@@ -15,6 +15,34 @@ struct Vertex {
     glm::vec2 pos;
     glm::vec3 color;
 
+    bool operator==(const Vertex& other) const {
+        return ((pos == other.pos) && (color == other.color));
+    }
+    bool operator<(const Vertex& other) const {
+        if (pos.x < other.pos.x) return true;
+        if (pos.x > other.pos.x) return false;
+        if (pos.x == other.pos.x) {
+            if (pos.y < other.pos.y) return true;
+            if (pos.y > other.pos.y) return false;
+            if (pos.y == other.pos.y) {
+                if (color.r < other.color.r) return true;
+                if (color.r > other.color.r) return false;
+                if (color.r == other.color.r) {
+                    if (color.g < other.color.g) return true;
+                    if (color.g > other.color.g) return false;
+                    if (color.g == other.color.g) {
+                        if (color.b < other.color.b) return true;
+                        if (color.b > other.color.b) return false;
+                        if (color.b == other.color.b) {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+
+    }
+
     static vk::VertexInputBindingDescription getBindingDescription() {
         vk::VertexInputBindingDescription bindingDescription(
             0,
@@ -51,9 +79,20 @@ struct Vertex {
 class Object {
 public:
     std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
     std::vector<std::function<void(Object*, float, std::set<int>)>> frameCallbacks{};
     Object(std::vector<Vertex> initVertices) {
-        vertices = initVertices;
+        std::map<Vertex, int32_t> indexMap;
+        for (Vertex v : initVertices) {
+            auto pos = indexMap.find(v);
+            if (pos == indexMap.end()) {
+                indices.push_back(vertices.size());
+                indexMap.insert({v, vertices.size()});
+                vertices.push_back(v);
+            } else {
+                indices.push_back(pos->second);
+            }
+        }
     }
     virtual ~Object() = default;  // for RTTI and callback polymorphism
     void runFrameCallbacks(float passedSeconds, std::set<int> pressedKeys) {

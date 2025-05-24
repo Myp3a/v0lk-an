@@ -105,6 +105,10 @@ namespace fw {
             vk::raii::Buffer vertexBuffer = nullptr;
             vk::raii::DeviceMemory vertexBufferMemory = nullptr;
             void* vertexBufferMemoryData;
+
+            vk::raii::Buffer indexBuffer = nullptr;
+            vk::raii::DeviceMemory indexBufferMemory = nullptr;
+            void* indexBufferMemoryData;
         
             std::set<int> pressedKeys;
         
@@ -146,11 +150,13 @@ namespace fw {
             void createCommandPool();
             void createStagingBuffer();
             void createVertexBuffer();
+            void createIndexBuffer();
             void createCommandBuffers();
             void recordCommandBuffer(uint32_t imageIndex, uint32_t bufferIndex);
             void createSyncObjects();
             void drawFrame();
             void putObjectsToBuffer();
+            void copyStagingToIndexBuffer();
             void copyStagingToVertexBuffer();
             uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
             void recreateSwapChain();

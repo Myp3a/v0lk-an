@@ -75,6 +75,7 @@ namespace fw {
         createCommandPool();
         createStagingBuffer();
         createVertexBuffer();
+        createIndexBuffer();
         createCommandBuffers();
         createSyncObjects();
     }
@@ -426,7 +427,7 @@ namespace fw {
     void Renderer::createStagingBuffer() {
         vk::BufferCreateInfo bufferInfo(
             {},
-            sizeof(Vertex) * 1, //vertices.size(),
+            8388608, // 8MB //vertices.size() * sizeof(Vertex) //indices.size() * sizeof(uint32_t),
             vk::BufferUsageFlagBits::eTransferSrc,
             vk::SharingMode::eExclusive
         );
@@ -435,7 +436,7 @@ namespace fw {
         vk::MemoryRequirements memRequirements(stagingBuffer.getMemoryRequirements());
 
         vk::MemoryAllocateInfo allocInfo(
-            8388608, // 8MB // memRequirements.size,
+            memRequirements.size,
             findMemoryType(memRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent)
         );
         stagingBufferMemory = device.allocateMemory(allocInfo);
@@ -447,7 +448,7 @@ namespace fw {
     void Renderer::createVertexBuffer() {
         vk::BufferCreateInfo bufferInfo(
             {},
-            sizeof(Vertex) * 1, //vertices.size(),
+            8388608, // 8MB //vertices.size() * sizeof(Vertex)
             vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::SharingMode::eExclusive
         );
@@ -456,13 +457,30 @@ namespace fw {
         vk::MemoryRequirements memRequirements(vertexBuffer.getMemoryRequirements());
 
         vk::MemoryAllocateInfo allocInfo(
-            8388608, // 8MB // memRequirements.size,
+            memRequirements.size,
             findMemoryType(memRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal)
         );
         vertexBufferMemory = device.allocateMemory(allocInfo);
         vertexBuffer.bindMemory(vertexBufferMemory, 0);
+    }
 
-        // vertexBufferMemoryData = vertexBufferMemory.mapMemory(0, 8388608); // bufferInfo.size);
+    void Renderer::createIndexBuffer() {
+        vk::BufferCreateInfo bufferInfo(
+            {},
+            8388608, // 8MB //indices.size() * sizeof(uint32_t),
+            vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            vk::SharingMode::eExclusive
+        );
+        indexBuffer = device.createBuffer(bufferInfo);
+
+        vk::MemoryRequirements memRequirements(indexBuffer.getMemoryRequirements());
+
+        vk::MemoryAllocateInfo allocInfo(
+            memRequirements.size,
+            findMemoryType(memRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal)
+        );
+        indexBufferMemory = device.allocateMemory(allocInfo);
+        indexBuffer.bindMemory(indexBufferMemory, 0);
     }
 
     void Renderer::createCommandBuffers() {
@@ -510,17 +528,18 @@ namespace fw {
             0,
             1
         );
+        commandBuffers[bufferIndex].bindIndexBuffer(indexBuffer, 0, vk::IndexType::eUint32);
         commandBuffers[bufferIndex].setViewport(0, viewport);
         vk::Rect2D scissor(
             {0, 0},
             swapChainExtent
         );
         commandBuffers[bufferIndex].setScissor(0, scissor);
-        uint32_t vertexCount = 0;
+        uint32_t indexCount = 0;
         for (fw::Object* obj : objects) {
-            vertexCount += obj->vertices.size();
+            indexCount += obj->indices.size();
         }
-        commandBuffers[bufferIndex].draw(vertexCount, 1, 0, 0);
+        commandBuffers[bufferIndex].drawIndexed(indexCount, 1, 0, 0, 0);
         commandBuffers[bufferIndex].endRenderPass();
 
         commandBuffers[bufferIndex].end();
@@ -568,7 +587,7 @@ namespace fw {
 
         device.resetFences({inFlightFences[currentFrame]});
 
-        putObjectsToBuffer();
+        //putObjectsToBuffer();
         
         recordCommandBuffer(imageIndex, currentFrame);
 
@@ -594,11 +613,51 @@ namespace fw {
 
     void Renderer::putObjectsToBuffer() {
         std::vector<fw::Vertex> vertices;
+        std::vector<uint32_t> indices;
+        uint32_t offset = 0;
         for (fw::Object* obj : objects) {
             vertices.insert(vertices.end(), obj->vertices.begin(), obj->vertices.end());
+            std::transform(obj->indices.begin(), obj->indices.end(), std::back_inserter(indices), [offset](uint32_t index){return index + offset;});
+            offset += obj->vertices.size();
         }
         memcpy(stagingBufferMemoryData, vertices.data(), (size_t)(vertices.size() * sizeof(fw::Vertex)));
         copyStagingToVertexBuffer();
+        memcpy(stagingBufferMemoryData, indices.data(), (size_t)(indices.size() * sizeof(uint32_t)));
+        copyStagingToIndexBuffer();
+    }
+
+    void Renderer::copyStagingToIndexBuffer() {
+        vk::CommandBufferAllocateInfo allocInfo{
+            commandPool,
+            vk::CommandBufferLevel::ePrimary,
+            1
+        };
+
+        vk::raii::CommandBuffer commandBuffer = std::move(device.allocateCommandBuffers(allocInfo)[0]);
+
+        vk::CommandBufferBeginInfo beginInfo{
+            vk::CommandBufferUsageFlagBits::eOneTimeSubmit
+        };
+
+        commandBuffer.begin(beginInfo);
+
+        vk::BufferCopy copyRegion{
+            0,
+            0,
+            8388608
+        };
+        commandBuffer.copyBuffer(stagingBuffer, indexBuffer, copyRegion);
+
+        commandBuffer.end();
+
+        vk::SubmitInfo submitInfo{
+            {},
+            {},
+            *commandBuffer,
+            {}
+        };
+        graphicsQueue.submit(submitInfo);
+        graphicsQueue.waitIdle();
     }
 
     void Renderer::copyStagingToVertexBuffer() {
