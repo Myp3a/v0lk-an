@@ -97,6 +97,10 @@ namespace fw {
             std::vector<vk::raii::Fence> inFlightFences;
             uint32_t currentFrame = 0;
             std::chrono::time_point<std::chrono::steady_clock> lastFrameTime = std::chrono::steady_clock::now();
+        
+            vk::raii::Buffer stagingBuffer = nullptr;
+            vk::raii::DeviceMemory stagingBufferMemory = nullptr;
+            void* stagingBufferMemoryData;
 
             vk::raii::Buffer vertexBuffer = nullptr;
             vk::raii::DeviceMemory vertexBufferMemory = nullptr;
@@ -140,12 +144,14 @@ namespace fw {
             void createGraphicsPipeline();
             void createFramebuffers();
             void createCommandPool();
+            void createStagingBuffer();
             void createVertexBuffer();
             void createCommandBuffers();
             void recordCommandBuffer(uint32_t imageIndex, uint32_t bufferIndex);
             void createSyncObjects();
             void drawFrame();
             void putObjectsToBuffer();
+            void copyStagingToVertexBuffer();
             uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
             void recreateSwapChain();
             vk::raii::ShaderModule createShaderModule(const std::vector<uint32_t>& code);

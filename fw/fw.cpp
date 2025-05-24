@@ -73,6 +73,7 @@ namespace fw {
         createGraphicsPipeline();
         createFramebuffers();
         createCommandPool();
+        createStagingBuffer();
         createVertexBuffer();
         createCommandBuffers();
         createSyncObjects();
@@ -422,11 +423,32 @@ namespace fw {
         commandPool = device.createCommandPool(poolInfo);
     }
 
+    void Renderer::createStagingBuffer() {
+        vk::BufferCreateInfo bufferInfo(
+            {},
+            sizeof(Vertex) * 1, //vertices.size(),
+            vk::BufferUsageFlagBits::eTransferSrc,
+            vk::SharingMode::eExclusive
+        );
+        stagingBuffer = device.createBuffer(bufferInfo);
+
+        vk::MemoryRequirements memRequirements(stagingBuffer.getMemoryRequirements());
+
+        vk::MemoryAllocateInfo allocInfo(
+            8388608, // 8MB // memRequirements.size,
+            findMemoryType(memRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent)
+        );
+        stagingBufferMemory = device.allocateMemory(allocInfo);
+        stagingBuffer.bindMemory(stagingBufferMemory, 0);
+
+        stagingBufferMemoryData = stagingBufferMemory.mapMemory(0, 8388608); // bufferInfo.size);
+    }
+
     void Renderer::createVertexBuffer() {
         vk::BufferCreateInfo bufferInfo(
             {},
             sizeof(Vertex) * 1, //vertices.size(),
-            vk::BufferUsageFlagBits::eVertexBuffer,
+            vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::SharingMode::eExclusive
         );
         vertexBuffer = device.createBuffer(bufferInfo);
@@ -435,12 +457,12 @@ namespace fw {
 
         vk::MemoryAllocateInfo allocInfo(
             8388608, // 8MB // memRequirements.size,
-            findMemoryType(memRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent)
+            findMemoryType(memRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal)
         );
         vertexBufferMemory = device.allocateMemory(allocInfo);
         vertexBuffer.bindMemory(vertexBufferMemory, 0);
 
-        vertexBufferMemoryData = vertexBufferMemory.mapMemory(0, 8388608); // bufferInfo.size);
+        // vertexBufferMemoryData = vertexBufferMemory.mapMemory(0, 8388608); // bufferInfo.size);
     }
 
     void Renderer::createCommandBuffers() {
@@ -575,7 +597,42 @@ namespace fw {
         for (fw::Object* obj : objects) {
             vertices.insert(vertices.end(), obj->vertices.begin(), obj->vertices.end());
         }
-        memcpy(vertexBufferMemoryData, vertices.data(), (size_t)(vertices.size() * sizeof(fw::Vertex)));
+        memcpy(stagingBufferMemoryData, vertices.data(), (size_t)(vertices.size() * sizeof(fw::Vertex)));
+        copyStagingToVertexBuffer();
+    }
+
+    void Renderer::copyStagingToVertexBuffer() {
+        vk::CommandBufferAllocateInfo allocInfo{
+            commandPool,
+            vk::CommandBufferLevel::ePrimary,
+            1
+        };
+
+        vk::raii::CommandBuffer commandBuffer = std::move(device.allocateCommandBuffers(allocInfo)[0]);
+
+        vk::CommandBufferBeginInfo beginInfo{
+            vk::CommandBufferUsageFlagBits::eOneTimeSubmit
+        };
+
+        commandBuffer.begin(beginInfo);
+
+        vk::BufferCopy copyRegion{
+            0,
+            0,
+            8388608
+        };
+        commandBuffer.copyBuffer(stagingBuffer, vertexBuffer, copyRegion);
+
+        commandBuffer.end();
+
+        vk::SubmitInfo submitInfo{
+            {},
+            {},
+            *commandBuffer,
+            {}
+        };
+        graphicsQueue.submit(submitInfo);
+        graphicsQueue.waitIdle();
     }
 
     uint32_t Renderer::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) {
