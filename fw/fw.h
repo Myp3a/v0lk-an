@@ -7,6 +7,11 @@
 
 #include <GLFW/glfw3.h>
 
+#define GLM_ENABLE_EXPERIMENTAL
+
+#include <glm/glm.hpp>
+#include <glm/gtx/transform.hpp>
+
 #include <fstream>
 #include <iostream>
 #include <optional>
@@ -86,6 +91,7 @@ namespace fw {
             std::vector<vk::raii::Framebuffer> swapChainFramebuffers;
         
             vk::raii::RenderPass renderPass = nullptr;
+            vk::raii::DescriptorSetLayout descriptorSetLayout = nullptr;
             vk::raii::PipelineLayout pipelineLayout = nullptr;
             vk::raii::Pipeline graphicsPipeline = nullptr;
         
@@ -109,10 +115,21 @@ namespace fw {
             vk::raii::Buffer indexBuffer = nullptr;
             vk::raii::DeviceMemory indexBufferMemory = nullptr;
             void* indexBufferMemoryData;
+
+            std::vector<vk::raii::Buffer> uniformBuffers;
+            std::vector<vk::raii::DeviceMemory> uniformBuffersMemory;
+            std::vector<void*> uniformBuffersMemoryData;
+
+            vk::raii::DescriptorPool descriptorPool = nullptr;
+            std::vector<vk::raii::DescriptorSet> descriptorSets;
         
             std::set<int> pressedKeys;
+            glm::vec2 cursorOffset;
+            float cameraSpeed = 1.0f;
+            float mouseSensitivity = 1.0f;
         
             std::vector<fw::Object*> objects {};
+            glm::vec3 cameraPos{0.0f,0.0f,1.0f};
         
             bool framebufferResized = false;
         
@@ -127,6 +144,13 @@ namespace fw {
                 else if (action == GLFW_RELEASE) {
                     app->pressedKeys.erase(key);
                 }
+            }
+
+            static void cursorPositionCallback(GLFWwindow* window, double xpos, double ypos) 
+            {
+                Renderer* app = reinterpret_cast<Renderer*>(glfwGetWindowUserPointer(window));
+                app->cursorOffset.x += xpos - app->swapChainExtent.width / 2;
+                app->cursorOffset.y += ypos - app->swapChainExtent.height / 2;
             }
 
             static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
@@ -145,16 +169,22 @@ namespace fw {
             void createSwapChain();
             void createImageViews();
             void createRenderPass();
+            void createDescriptorSetLayout();
             void createGraphicsPipeline();
             void createFramebuffers();
             void createCommandPool();
             void createStagingBuffer();
             void createVertexBuffer();
             void createIndexBuffer();
+            void createUniformBuffers();
+            void createDescriptorPool();
+            void createDescriptorSets();
             void createCommandBuffers();
             void recordCommandBuffer(uint32_t imageIndex, uint32_t bufferIndex);
             void createSyncObjects();
             void drawFrame();
+            void updateCameraPosition(float passedSeconds);
+            void updateUniformBuffer(uint32_t imageIndex);
             void putObjectsToBuffer();
             void copyStagingToIndexBuffer();
             void copyStagingToVertexBuffer();

@@ -59,6 +59,10 @@ namespace fw {
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
         glfwSetKeyCallback(window, keyCallback);
+        glfwSetCursorPosCallback(window, cursorPositionCallback);
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        if (glfwRawMouseMotionSupported())
+            glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
     }
 
     void Renderer::initVulkan() {
@@ -70,12 +74,16 @@ namespace fw {
         createSwapChain();
         createImageViews();
         createRenderPass();
+        createDescriptorSetLayout();
         createGraphicsPipeline();
         createFramebuffers();
         createCommandPool();
         createStagingBuffer();
         createVertexBuffer();
         createIndexBuffer();
+        createUniformBuffers();
+        createDescriptorPool();
+        createDescriptorSets();
         createCommandBuffers();
         createSyncObjects();
     }
@@ -279,6 +287,21 @@ namespace fw {
         renderPass = device.createRenderPass(renderPassInfo);
     }
 
+    void Renderer::createDescriptorSetLayout() {
+        vk::DescriptorSetLayoutBinding uboLayoutBinding{
+            0,
+            vk::DescriptorType::eUniformBuffer,
+            1,
+            vk::ShaderStageFlagBits::eVertex,
+            nullptr
+        };
+        vk::DescriptorSetLayoutCreateInfo layoutInfo{
+            {},
+            uboLayoutBinding
+        };
+        descriptorSetLayout = device.createDescriptorSetLayout(layoutInfo);
+    }
+
     void Renderer::createGraphicsPipeline() {
         auto vertShaderCode = readFile("shaders/base.vert.spv");
         auto fragShaderCode = readFile("shaders/base.frag.spv");
@@ -371,10 +394,16 @@ namespace fw {
             dynamicStates
         );
 
+        vk::PushConstantRange pushConstantRange(
+            vk::ShaderStageFlagBits::eVertex,
+            0,
+            sizeof(glm::mat4)
+        );
+
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo(
             {},
-            nullptr,
-            nullptr
+            *descriptorSetLayout,
+            pushConstantRange
         );
 
         pipelineLayout = device.createPipelineLayout(pipelineLayoutInfo);
@@ -483,6 +512,70 @@ namespace fw {
         indexBuffer.bindMemory(indexBufferMemory, 0);
     }
 
+    void Renderer::createUniformBuffers() {
+        vk::DeviceSize bufferSize = sizeof(UniformBufferObject);
+
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            vk::BufferCreateInfo bufferInfo(
+                {},
+                8388608, // 8MB //indices.size() * sizeof(uint32_t),
+                vk::BufferUsageFlagBits::eUniformBuffer,
+                vk::SharingMode::eExclusive
+            );
+            uniformBuffers.push_back(device.createBuffer(bufferInfo));
+
+            vk::MemoryRequirements memRequirements(uniformBuffers[i].getMemoryRequirements());
+
+            vk::MemoryAllocateInfo allocInfo(
+                memRequirements.size,
+                findMemoryType(memRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent)
+            );
+            uniformBuffersMemory.push_back(device.allocateMemory(allocInfo));
+            uniformBuffers[i].bindMemory(uniformBuffersMemory[i], 0);
+            
+            uniformBuffersMemoryData.push_back(uniformBuffersMemory[i].mapMemory(0, 8388608)); // bufferInfo.size);
+        }
+    }
+
+    void Renderer::createDescriptorPool() {
+        vk::DescriptorPoolSize poolSize{
+            vk::DescriptorType::eUniformBuffer,
+            static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT)
+        };
+        vk::DescriptorPoolCreateInfo poolInfo{
+            {},
+            static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT),
+            poolSize
+        };
+        descriptorPool = device.createDescriptorPool(poolInfo);
+    }
+
+    void Renderer::createDescriptorSets() {
+        std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
+        vk::DescriptorSetAllocateInfo allocInfo{
+            descriptorPool,
+            layouts
+        };
+        descriptorSets = device.allocateDescriptorSets(allocInfo);
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            vk::DescriptorBufferInfo bufferInfo{
+                uniformBuffers[i],
+                0,
+                sizeof(UniformBufferObject)
+            };
+            vk::WriteDescriptorSet descriptorWrite{
+                descriptorSets[i],
+                0,
+                0,
+                vk::DescriptorType::eUniformBuffer,
+                nullptr,
+                bufferInfo,
+                nullptr
+            };
+            device.updateDescriptorSets(descriptorWrite, nullptr);
+        }
+    }
+
     void Renderer::createCommandBuffers() {
         vk::CommandBufferAllocateInfo allocInfo(
             commandPool,
@@ -535,11 +628,19 @@ namespace fw {
             swapChainExtent
         );
         commandBuffers[bufferIndex].setScissor(0, scissor);
-        uint32_t indexCount = 0;
-        for (fw::Object* obj : objects) {
-            indexCount += obj->indices.size();
+        // uint32_t indexCount = 0;
+        // for (fw::Object* obj : objects) {
+        //     indexCount += obj->indices.size();
+        // }
+        commandBuffers[bufferIndex].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, *descriptorSets[bufferIndex], nullptr);
+        uint32_t alreadyDrawn = 0;
+        for (int i = 0; i < objects.size(); i++) {
+            PushConstants cnst;
+            cnst.model = objects[i]->modelMatrix();
+            commandBuffers[bufferIndex].pushConstants<PushConstants>(pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, {cnst});
+            commandBuffers[bufferIndex].drawIndexed(objects[i]->indices.size(), 1, alreadyDrawn, 0, 0);
+            alreadyDrawn += objects[i]->indices.size();
         }
-        commandBuffers[bufferIndex].drawIndexed(indexCount, 1, 0, 0, 0);
         commandBuffers[bufferIndex].endRenderPass();
 
         commandBuffers[bufferIndex].end();
@@ -565,14 +666,18 @@ namespace fw {
             return;
         }
 
+        float passedSeconds = std::chrono::duration_cast<std::chrono::microseconds>(sinceLastFrame).count() / 1000000.0f;
+
         //for (fw::Object* obj : objects) {  // breaks 'cause reallocation
         for (int i = 0; i < objects.size(); i++) {
             fw::Object* obj = objects[i];
             obj->runFrameCallbacks(
-                std::chrono::duration_cast<std::chrono::microseconds>(sinceLastFrame).count() / 1000000.0f,
+                passedSeconds,
                 pressedKeys
             );
         }
+
+        updateCameraPosition(passedSeconds);
         
         std::pair<vk::Result, uint32_t> nextImagePair = swapChain.acquireNextImage(UINT64_MAX, imageAvailableSemaphores[currentFrame], nullptr);
         if (nextImagePair.first == vk::Result::eErrorOutOfDateKHR || nextImagePair.first == vk::Result::eSuboptimalKHR || framebufferResized) {
@@ -590,6 +695,8 @@ namespace fw {
         //putObjectsToBuffer();
         
         recordCommandBuffer(imageIndex, currentFrame);
+
+        updateUniformBuffer(currentFrame);
 
         vk::PipelineStageFlags waitStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
         vk::SubmitInfo submitInfo(
@@ -609,6 +716,35 @@ namespace fw {
         presentQueue.presentKHR(presentInfo);
 
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+    }
+
+    void Renderer::updateCameraPosition(float passedSeconds) {
+        if (pressedKeys.contains(GLFW_KEY_W)) {
+            cameraPos.z -= passedSeconds;
+        }
+        if (pressedKeys.contains(GLFW_KEY_S)) {
+            cameraPos.z += passedSeconds;
+        }
+        if (pressedKeys.contains(GLFW_KEY_A)) {
+            cameraPos.x -= passedSeconds;
+        }
+        if (pressedKeys.contains(GLFW_KEY_D)) {
+            cameraPos.x += passedSeconds;
+        }
+        if (pressedKeys.contains(GLFW_KEY_Q)) {
+            cameraPos.y -= passedSeconds;
+        }
+        if (pressedKeys.contains(GLFW_KEY_E)) {
+            cameraPos.y += passedSeconds;
+        }
+    }
+
+    void Renderer::updateUniformBuffer(uint32_t imageIndex) {
+        UniformBufferObject ubo{};
+        // ubo.model = objects[0]->modelMatrix();
+        ubo.view = glm::translate(cameraPos * -1.0f);
+        ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);
+        memcpy(uniformBuffersMemoryData[imageIndex], &ubo, sizeof(ubo));
     }
 
     void Renderer::putObjectsToBuffer() {

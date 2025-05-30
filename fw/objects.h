@@ -6,10 +6,23 @@
 #include <vector>
 #include <set>
 
+#define GLM_ENABLE_EXPERIMENTAL
+
 #include <vulkan/vulkan.hpp>
 #include <glm/glm.hpp>
+#include <glm/gtx/transform.hpp>
 
 namespace fw {
+
+struct UniformBufferObject {
+    //glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 proj;
+};
+
+struct PushConstants {
+    glm::mat4 model;
+};
 
 struct Vertex {
     glm::vec2 pos;
@@ -40,7 +53,6 @@ struct Vertex {
                 }
             }
         }
-
     }
 
     static vk::VertexInputBindingDescription getBindingDescription() {
@@ -81,6 +93,11 @@ public:
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
     std::vector<std::function<void(Object*, float, std::set<int>)>> frameCallbacks{};
+
+    glm::vec3 translation{0,0,0};
+    glm::vec3 scaling{1,1,1};
+    glm::vec3 rotation{0,0,0};
+
     Object(std::vector<Vertex> initVertices) {
         std::map<Vertex, int32_t> indexMap;
         for (Vertex v : initVertices) {
@@ -108,38 +125,47 @@ public:
             v.color.b = color[2];
         }
     }
-    void moveUp(float distance) {
-        for (Vertex& v : vertices) {
-            v.pos.g -= distance;
-        }
+    glm::mat4 modelMatrix() {
+        glm::mat4 translationMatrix = glm::translate(translation);
+        glm::mat4 scaleMatrix = glm::scale(scaling);
+        glm::mat4 rotationMatrixX = glm::rotate(rotation.x, glm::vec3(1, 0, 0));
+        glm::mat4 rotationMatrixY = glm::rotate(rotation.y, glm::vec3(0, 1, 0));
+        glm::mat4 rotationMatrixZ = glm::rotate(rotation.z, glm::vec3(0, 0, 1));
+        glm::mat4 result = translationMatrix * rotationMatrixX * rotationMatrixY * rotationMatrixZ * scaleMatrix;
+        return result;
     }
-    void moveDown(float distance) {
-        moveUp(-distance);
-    }
-    void moveLeft(float distance) {
-        for (Vertex& v : vertices) {
-            v.pos.r -= distance;
-        }
-    }
-    void moveRight(float distance) {
-        moveLeft(-distance);
-    }
-    float boundUp() {
-        float min = std::min_element(vertices.begin(), vertices.end(), [&](const Vertex& a, const Vertex& b) { return a.pos.g < b.pos.g; })->pos.g;
-        return min;
-    }
-    float boundDown() {
-        float max = std::max_element(vertices.begin(), vertices.end(), [&](const Vertex& a, const Vertex& b) { return a.pos.g < b.pos.g; })->pos.g;
-        return max;
-    }
-    float boundLeft() {
-        float min = std::min_element(vertices.begin(), vertices.end(), [&](const Vertex& a, const Vertex& b) { return a.pos.r < b.pos.r; })->pos.r;
-        return min;
-    }
-    float boundRight() {
-        float max = std::max_element(vertices.begin(), vertices.end(), [&](const Vertex& a, const Vertex& b) { return a.pos.r < b.pos.r; })->pos.r;
-        return max;
-    }
+    // void moveUp(float distance) {
+    //     for (Vertex& v : vertices) {
+    //         v.pos.g -= distance;
+    //     }
+    // }
+    // void moveDown(float distance) {
+    //     moveUp(-distance);
+    // }
+    // void moveLeft(float distance) {
+    //     for (Vertex& v : vertices) {
+    //         v.pos.r -= distance;
+    //     }
+    // }
+    // void moveRight(float distance) {
+    //     moveLeft(-distance);
+    // }
+    // float boundUp() {
+    //     float min = std::min_element(vertices.begin(), vertices.end(), [&](const Vertex& a, const Vertex& b) { return a.pos.g < b.pos.g; })->pos.g;
+    //     return min;
+    // }
+    // float boundDown() {
+    //     float max = std::max_element(vertices.begin(), vertices.end(), [&](const Vertex& a, const Vertex& b) { return a.pos.g < b.pos.g; })->pos.g;
+    //     return max;
+    // }
+    // float boundLeft() {
+    //     float min = std::min_element(vertices.begin(), vertices.end(), [&](const Vertex& a, const Vertex& b) { return a.pos.r < b.pos.r; })->pos.r;
+    //     return min;
+    // }
+    // float boundRight() {
+    //     float max = std::max_element(vertices.begin(), vertices.end(), [&](const Vertex& a, const Vertex& b) { return a.pos.r < b.pos.r; })->pos.r;
+    //     return max;
+    // }
 };
 // class Triangle2D : public Object {};
 class Square2D : public Object {
