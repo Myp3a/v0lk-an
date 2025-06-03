@@ -11,11 +11,11 @@
 #include <vulkan/vulkan.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
+#include <glm/gtx/quaternion.hpp>
 
 namespace fw {
 
 struct UniformBufferObject {
-    //glm::mat4 model;
     glm::mat4 view;
     glm::mat4 proj;
 };
@@ -25,7 +25,7 @@ struct PushConstants {
 };
 
 struct Vertex {
-    glm::vec2 pos;
+    glm::vec3 pos;
     glm::vec3 color;
 
     bool operator==(const Vertex& other) const {
@@ -71,7 +71,7 @@ struct Vertex {
         vk::VertexInputAttributeDescription positionDescription(
             0,
             0,
-            vk::Format::eR32G32Sfloat,
+            vk::Format::eR32G32B32Sfloat,
             offsetof(Vertex, pos)
         );
         attributeDescriptions.push_back(positionDescription);
@@ -88,15 +88,85 @@ struct Vertex {
     }
 };
 
+class Transform {
+    public:
+    glm::vec3 translation{0,0,0};
+    glm::vec3 scaling{1,1,1};
+    glm::quat rotationQuat{1,0,0,0};
+
+    class Position {
+        private:
+        Transform* parent;
+        public:
+        Position(Transform* loc): parent(loc) {}
+        void forward(float distance) {
+            parent->translation += parent->rotationQuat * glm::vec3(0, 0, distance);
+        }
+        void backward(float distance) {
+            forward(-distance);
+        }
+        void left(float distance) {
+            parent->translation += parent->rotationQuat * glm::vec3(distance, 0, 0);
+        }
+        void right(float distance) {
+            left(-distance);
+        }
+        void up(float distance) {
+            parent->translation += parent->rotationQuat * glm::vec3(0, distance, 0);
+        }
+        void down(float distance) {
+            up(-distance);
+        }
+    };
+    Position position = nullptr;
+
+    class Rotation {
+        private:
+        Transform* parent;
+        public:
+        Rotation(Transform* loc): parent(loc) {}
+        void up(float degrees) {
+            parent->rotationQuat = glm::normalize(parent->rotationQuat * glm::quat({degrees, 0, 0}));
+        }
+        void down(float degrees) {
+            up(-degrees);
+        }
+        void left(float degrees) {
+            parent->rotationQuat = glm::normalize(parent->rotationQuat * glm::quat({0, degrees, 0}));
+        }
+        void right(float degrees) {
+            left(-degrees);
+        }
+        void ccw(float degrees) {
+            parent->rotationQuat = glm::normalize(parent->rotationQuat * glm::quat({0, 0, degrees}));
+        }
+        void cw(float degrees) {
+            ccw(-degrees);
+        }
+    };
+    Rotation rotation = nullptr;
+
+    Transform() {
+        position = Position(this);
+        rotation = Rotation(this);
+    }
+
+    glm::mat4 modelMatrix() {
+        glm::mat4 translationMatrix = glm::translate(translation);
+        glm::mat4 scaleMatrix = glm::scale(scaling);
+        glm::mat4 rotationMatrix = glm::toMat4(rotationQuat);
+        glm::mat4 result = translationMatrix * rotationMatrix * scaleMatrix;
+        return result;
+    }
+    
+};
+
 class Object {
 public:
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
     std::vector<std::function<void(Object*, float, std::set<int>)>> frameCallbacks{};
-
-    glm::vec3 translation{0,0,0};
-    glm::vec3 scaling{1,1,1};
-    glm::vec3 rotation{0,0,0};
+    Transform transform;
 
     Object(std::vector<Vertex> initVertices) {
         std::map<Vertex, int32_t> indexMap;
@@ -125,47 +195,6 @@ public:
             v.color.b = color[2];
         }
     }
-    glm::mat4 modelMatrix() {
-        glm::mat4 translationMatrix = glm::translate(translation);
-        glm::mat4 scaleMatrix = glm::scale(scaling);
-        glm::mat4 rotationMatrixX = glm::rotate(rotation.x, glm::vec3(1, 0, 0));
-        glm::mat4 rotationMatrixY = glm::rotate(rotation.y, glm::vec3(0, 1, 0));
-        glm::mat4 rotationMatrixZ = glm::rotate(rotation.z, glm::vec3(0, 0, 1));
-        glm::mat4 result = translationMatrix * rotationMatrixX * rotationMatrixY * rotationMatrixZ * scaleMatrix;
-        return result;
-    }
-    // void moveUp(float distance) {
-    //     for (Vertex& v : vertices) {
-    //         v.pos.g -= distance;
-    //     }
-    // }
-    // void moveDown(float distance) {
-    //     moveUp(-distance);
-    // }
-    // void moveLeft(float distance) {
-    //     for (Vertex& v : vertices) {
-    //         v.pos.r -= distance;
-    //     }
-    // }
-    // void moveRight(float distance) {
-    //     moveLeft(-distance);
-    // }
-    // float boundUp() {
-    //     float min = std::min_element(vertices.begin(), vertices.end(), [&](const Vertex& a, const Vertex& b) { return a.pos.g < b.pos.g; })->pos.g;
-    //     return min;
-    // }
-    // float boundDown() {
-    //     float max = std::max_element(vertices.begin(), vertices.end(), [&](const Vertex& a, const Vertex& b) { return a.pos.g < b.pos.g; })->pos.g;
-    //     return max;
-    // }
-    // float boundLeft() {
-    //     float min = std::min_element(vertices.begin(), vertices.end(), [&](const Vertex& a, const Vertex& b) { return a.pos.r < b.pos.r; })->pos.r;
-    //     return min;
-    // }
-    // float boundRight() {
-    //     float max = std::max_element(vertices.begin(), vertices.end(), [&](const Vertex& a, const Vertex& b) { return a.pos.r < b.pos.r; })->pos.r;
-    //     return max;
-    // }
 };
 // class Triangle2D : public Object {};
 class Square2D : public Object {
@@ -177,12 +206,12 @@ public:
         bot = std::max(topLeft[1], botRight[1]);
         left = std::min(topLeft[0], botRight[0]);
         right = std::max(topLeft[0], botRight[0]);
-        vertices.push_back({{left, top}, {1.0f,1.0f,1.0f}});
-        vertices.push_back({{right, top}, {1.0f,1.0f,1.0f}});
-        vertices.push_back({{left, bot}, {1.0f,1.0f,1.0f}});
-        vertices.push_back({{right, top}, {1.0f,1.0f,1.0f}});
-        vertices.push_back({{right, bot}, {1.0f,1.0f,1.0f}});
-        vertices.push_back({{left, bot}, {1.0f,1.0f,1.0f}});
+        vertices.push_back({{left, top, 0}, {1.0f,1.0f,1.0f}});
+        vertices.push_back({{right, top, 0}, {1.0f,1.0f,1.0f}});
+        vertices.push_back({{left, bot, 0}, {1.0f,1.0f,1.0f}});
+        vertices.push_back({{right, top, 0}, {1.0f,1.0f,1.0f}});
+        vertices.push_back({{right, bot, 0}, {1.0f,1.0f,1.0f}});
+        vertices.push_back({{left, bot, 0}, {1.0f,1.0f,1.0f}});
         return vertices;
     }
 

@@ -61,8 +61,10 @@ namespace fw {
         glfwSetKeyCallback(window, keyCallback);
         glfwSetCursorPosCallback(window, cursorPositionCallback);
         glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-        if (glfwRawMouseMotionSupported())
+        if (glfwRawMouseMotionSupported()) {
             glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+            rawMouseInput = true;
+        }
     }
 
     void Renderer::initVulkan() {
@@ -89,7 +91,7 @@ namespace fw {
     }
 
     void Renderer::mainLoop() {
-        while (!glfwWindowShouldClose(window)) {
+        while (!glfwWindowShouldClose(window) && !shouldExit) {
             glfwPollEvents();
             drawFrame();
         }
@@ -636,7 +638,7 @@ namespace fw {
         uint32_t alreadyDrawn = 0;
         for (int i = 0; i < objects.size(); i++) {
             PushConstants cnst;
-            cnst.model = objects[i]->modelMatrix();
+            cnst.model = objects[i]->transform.modelMatrix();
             commandBuffers[bufferIndex].pushConstants<PushConstants>(pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, {cnst});
             commandBuffers[bufferIndex].drawIndexed(objects[i]->indices.size(), 1, alreadyDrawn, 0, 0);
             alreadyDrawn += objects[i]->indices.size();
@@ -716,33 +718,38 @@ namespace fw {
         presentQueue.presentKHR(presentInfo);
 
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+
+        if (pressedKeys.contains(GLFW_KEY_ESCAPE)) shouldExit = true;
     }
 
     void Renderer::updateCameraPosition(float passedSeconds) {
         if (pressedKeys.contains(GLFW_KEY_W)) {
-            cameraPos.z -= passedSeconds;
+            camera.transform.position.backward(passedSeconds * cameraSpeed);
         }
         if (pressedKeys.contains(GLFW_KEY_S)) {
-            cameraPos.z += passedSeconds;
+            camera.transform.position.forward(passedSeconds * cameraSpeed);
         }
         if (pressedKeys.contains(GLFW_KEY_A)) {
-            cameraPos.x -= passedSeconds;
+            camera.transform.position.right(passedSeconds * cameraSpeed);
         }
         if (pressedKeys.contains(GLFW_KEY_D)) {
-            cameraPos.x += passedSeconds;
+            camera.transform.position.left(passedSeconds * cameraSpeed);
         }
         if (pressedKeys.contains(GLFW_KEY_Q)) {
-            cameraPos.y -= passedSeconds;
+            camera.transform.position.up(passedSeconds * cameraSpeed);
         }
         if (pressedKeys.contains(GLFW_KEY_E)) {
-            cameraPos.y += passedSeconds;
+            camera.transform.position.down(passedSeconds * cameraSpeed);
         }
+        camera.transform.rotation.up(cursorOffset.y * mouseSensitivity * 0.0001f);
+        camera.transform.rotation.left(cursorOffset.x * mouseSensitivity * 0.0001f);
+        cursorOffset.x = 0;
+        cursorOffset.y = 0;
     }
 
     void Renderer::updateUniformBuffer(uint32_t imageIndex) {
         UniformBufferObject ubo{};
-        // ubo.model = objects[0]->modelMatrix();
-        ubo.view = glm::translate(cameraPos * -1.0f);
+        ubo.view = glm::inverse(camera.transform.modelMatrix());
         ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);
         memcpy(uniformBuffersMemoryData[imageIndex], &ubo, sizeof(ubo));
     }

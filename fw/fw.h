@@ -11,6 +11,7 @@
 
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
+#include <glm/gtx/quaternion.hpp>
 
 #include <fstream>
 #include <iostream>
@@ -125,13 +126,16 @@ namespace fw {
         
             std::set<int> pressedKeys;
             glm::vec2 cursorOffset;
+            glm::vec2 prevOffset;
             float cameraSpeed = 1.0f;
             float mouseSensitivity = 1.0f;
+            bool rawMouseInput = false;
         
+            fw::Object camera = fw::Object({});
             std::vector<fw::Object*> objects {};
-            glm::vec3 cameraPos{0.0f,0.0f,1.0f};
         
             bool framebufferResized = false;
+            bool shouldExit = false;
         
             void initWindow();
 
@@ -149,8 +153,15 @@ namespace fw {
             static void cursorPositionCallback(GLFWwindow* window, double xpos, double ypos) 
             {
                 Renderer* app = reinterpret_cast<Renderer*>(glfwGetWindowUserPointer(window));
-                app->cursorOffset.x += xpos - app->swapChainExtent.width / 2;
-                app->cursorOffset.y += ypos - app->swapChainExtent.height / 2;
+                app->cursorOffset.x += xpos - app->prevOffset.x;
+                app->cursorOffset.y += ypos - app->prevOffset.y;
+                if (app->rawMouseInput) {
+                    app->prevOffset.x = 0;
+                    app->prevOffset.y = 0;
+                } else {
+                    app->prevOffset.x = xpos;
+                    app->prevOffset.y = ypos;
+                }
             }
 
             static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
