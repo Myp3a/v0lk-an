@@ -100,19 +100,19 @@ class Transform {
         public:
         Position(Transform* loc): parent(loc) {}
         void forward(float distance) {
-            parent->translation += parent->rotationQuat * glm::vec3(0, 0, distance);
+            parent->translation -= parent->rotationQuat * glm::vec3(0, 0, distance);
         }
         void backward(float distance) {
             forward(-distance);
         }
         void left(float distance) {
-            parent->translation += parent->rotationQuat * glm::vec3(distance, 0, 0);
+            parent->translation -= parent->rotationQuat * glm::vec3(distance, 0, 0);
         }
         void right(float distance) {
             left(-distance);
         }
         void up(float distance) {
-            parent->translation += parent->rotationQuat * glm::vec3(0, distance, 0);
+            parent->translation -= parent->rotationQuat * glm::vec3(0, distance, 0);
         }
         void down(float distance) {
             up(-distance);

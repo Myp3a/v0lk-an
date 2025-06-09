@@ -724,25 +724,25 @@ namespace fw {
 
     void Renderer::updateCameraPosition(float passedSeconds) {
         if (pressedKeys.contains(GLFW_KEY_W)) {
-            camera.transform.position.backward(passedSeconds * cameraSpeed);
-        }
-        if (pressedKeys.contains(GLFW_KEY_S)) {
             camera.transform.position.forward(passedSeconds * cameraSpeed);
         }
-        if (pressedKeys.contains(GLFW_KEY_A)) {
-            camera.transform.position.right(passedSeconds * cameraSpeed);
+        if (pressedKeys.contains(GLFW_KEY_S)) {
+            camera.transform.position.backward(passedSeconds * cameraSpeed);
         }
-        if (pressedKeys.contains(GLFW_KEY_D)) {
+        if (pressedKeys.contains(GLFW_KEY_A)) {
             camera.transform.position.left(passedSeconds * cameraSpeed);
         }
-        if (pressedKeys.contains(GLFW_KEY_Q)) {
-            camera.transform.position.up(passedSeconds * cameraSpeed);
+        if (pressedKeys.contains(GLFW_KEY_D)) {
+            camera.transform.position.right(passedSeconds * cameraSpeed);
         }
-        if (pressedKeys.contains(GLFW_KEY_E)) {
+        if (pressedKeys.contains(GLFW_KEY_Q)) {
             camera.transform.position.down(passedSeconds * cameraSpeed);
         }
+        if (pressedKeys.contains(GLFW_KEY_E)) {
+            camera.transform.position.up(passedSeconds * cameraSpeed);
+        }
         camera.transform.rotation.up(cursorOffset.y * mouseSensitivity * 0.0001f);
-        camera.transform.rotation.left(cursorOffset.x * mouseSensitivity * 0.0001f);
+        camera.transform.rotation.right(cursorOffset.x * mouseSensitivity * 0.0001f);
         cursorOffset.x = 0;
         cursorOffset.y = 0;
     }
