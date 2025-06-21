@@ -99,23 +99,35 @@ class Transform {
         Transform* parent;
         public:
         Position(Transform* loc): parent(loc) {}
-        void forward(float distance) {
-            parent->translation -= parent->rotationQuat * glm::vec3(0, 0, distance);
+        void forward(float distance, bool world = false) {
+            if (world) {
+                parent->translation -= glm::vec3(0, 0, distance);
+            } else {
+                parent->translation -= parent->rotationQuat * glm::vec3(0, 0, distance);
+            }
         }
-        void backward(float distance) {
-            forward(-distance);
+        void backward(float distance, bool world = false) {
+            forward(-distance, world);
         }
-        void left(float distance) {
-            parent->translation -= parent->rotationQuat * glm::vec3(distance, 0, 0);
+        void left(float distance, bool world = false) {
+            if (world) {
+                parent->translation -= parent->rotationQuat * glm::vec3(distance, 0, 0);
+            } else {
+                parent->translation -= glm::vec3(distance, 0, 0);
+            }
         }
-        void right(float distance) {
-            left(-distance);
+        void right(float distance, bool world = false) {
+            left(-distance, world);
         }
-        void up(float distance) {
-            parent->translation -= parent->rotationQuat * glm::vec3(0, distance, 0);
+        void up(float distance, bool world = false) {
+            if (world) {
+                parent->translation -= glm::vec3(0, distance, 0);
+            } else {
+                parent->translation -= parent->rotationQuat * glm::vec3(0, distance, 0);
+            }
         }
-        void down(float distance) {
-            up(-distance);
+        void down(float distance, bool world = false) {
+            up(-distance, world);
         }
     };
     Position position = nullptr;
@@ -125,23 +137,35 @@ class Transform {
         Transform* parent;
         public:
         Rotation(Transform* loc): parent(loc) {}
-        void up(float degrees) {
-            parent->rotationQuat = glm::normalize(parent->rotationQuat * glm::quat({degrees, 0, 0}));
+        void up(float degrees, bool world = false) {
+            if (world) {
+                parent->rotationQuat = glm::normalize(glm::quat({degrees, 0, 0}) * parent->rotationQuat);
+            } else {
+                parent->rotationQuat = glm::normalize(parent->rotationQuat * glm::quat({degrees, 0, 0}));
+            }
         }
-        void down(float degrees) {
-            up(-degrees);
+        void down(float degrees, bool world = false) {
+            up(-degrees, world);
         }
-        void left(float degrees) {
-            parent->rotationQuat = glm::normalize(parent->rotationQuat * glm::quat({0, degrees, 0}));
+        void left(float degrees, bool world = false) {
+            if (world) {
+                parent->rotationQuat = glm::normalize(glm::quat({0, degrees, 0}) * parent->rotationQuat);
+            } else {
+                parent->rotationQuat = glm::normalize(parent->rotationQuat * glm::quat({0, degrees, 0}));
+            }
         }
-        void right(float degrees) {
-            left(-degrees);
+        void right(float degrees, bool world = false) {
+            left(-degrees, world);
         }
-        void ccw(float degrees) {
-            parent->rotationQuat = glm::normalize(parent->rotationQuat * glm::quat({0, 0, degrees}));
+        void ccw(float degrees, bool world = false) {
+            if (world) {
+                parent->rotationQuat = glm::normalize(glm::quat({0, 0, degrees}) * parent->rotationQuat);
+            } else {
+                parent->rotationQuat = glm::normalize(parent->rotationQuat * glm::quat({0, 0, degrees}));
+            }
         }
-        void cw(float degrees) {
-            ccw(-degrees);
+        void cw(float degrees, bool world = false) {
+            ccw(-degrees, world);
         }
     };
     Rotation rotation = nullptr;

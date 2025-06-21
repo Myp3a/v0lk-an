@@ -742,7 +742,7 @@ namespace fw {
             camera.transform.position.up(passedSeconds * cameraSpeed);
         }
         camera.transform.rotation.up(cursorOffset.y * mouseSensitivity * 0.0001f);
-        camera.transform.rotation.right(cursorOffset.x * mouseSensitivity * 0.0001f);
+        camera.transform.rotation.right(cursorOffset.x * mouseSensitivity * 0.0001f, true);
         cursorOffset.x = 0;
         cursorOffset.y = 0;
     }
