@@ -1,25 +1,26 @@
 #pragma once
 
-#include <vulkan/vulkan.h>
-#include <vulkan/vulkan_beta.h>
-#include <vulkan/vulkan.hpp>
-#include <vulkan/vulkan_raii.hpp>
-
-#include <GLFW/glfw3.h>
-
-#define GLM_ENABLE_EXPERIMENTAL
-
-#include <glm/glm.hpp>
-#include <glm/gtx/transform.hpp>
-#include <glm/gtx/quaternion.hpp>
-
+#include <array>
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <optional>
 #include <set>
 #include <string>
+#include <vector>
+
+#define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
+#include <vulkan/vulkan.h>
+#include <vulkan/vulkan_beta.h>
+#include <vulkan/vulkan_raii.hpp>
+
+#include <GLFW/glfw3.h>
+
+#include <glm/glm.hpp>
 
 #include <objects.h>
+#include <raii_wrappers.h>
+
 
 namespace fw {
     const uint32_t WIDTH = 800;
@@ -44,26 +45,36 @@ namespace fw {
     };
 
     class Renderer {
+        friend class fw::Object;
+
+        uint32_t maxTextures = 64;
+
         public:
             Renderer();
             void init();
+            void run();
             void addObject(fw::Object* obj);
             void delObject(fw::Object* obj);
-            void run();
+            Square2D createSquare(std::array<float, 2> topLeft, std::array<float, 2> botRight, std::array<float, 3> color);
         
         private:
             const std::vector<const char*> validationLayers = {
                 "VK_LAYER_KHRONOS_validation"
             };
-
+            const std::vector<const char*> instanceExtensions = {
+                VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+                VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
+            };
             #if __APPLE__
             const std::vector<const char*> deviceExtensions = {
                 VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-                VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME
+                VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
+                VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
             };
             #else
             const std::vector<const char*> deviceExtensions = {
-                VK_KHR_SWAPCHAIN_EXTENSION_NAME
+                VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+                VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
             };
             #endif
             #ifdef NDEBUG
@@ -71,6 +82,12 @@ namespace fw {
             #else
             const bool enableValidationLayers = true;
             #endif
+            static bool hasRequiredPhysicalDeviceFeatures(vk::PhysicalDeviceFeatures2 deviceFeatures) {
+                return deviceFeatures.features.samplerAnisotropy;
+            }
+            static bool hasRequiredPhysicalDeviceDescriptorFeatures(vk::PhysicalDeviceDescriptorIndexingFeaturesEXT deviceFeatures) {
+                return deviceFeatures.descriptorBindingPartiallyBound && deviceFeatures.descriptorBindingSampledImageUpdateAfterBind && deviceFeatures.descriptorBindingVariableDescriptorCount && deviceFeatures.runtimeDescriptorArray;
+            }
             GLFWwindow* window;
         
             vk::raii::Context context;
@@ -79,7 +96,11 @@ namespace fw {
             vk::raii::SurfaceKHR surface = nullptr;
         
             vk::raii::PhysicalDevice physicalDevice = nullptr;
+            vk::PhysicalDeviceProperties physicalDeviceProperties;
             vk::raii::Device device = nullptr;
+
+            DeviceBufferCopyHandler deviceBufferCopyHandler = nullptr;
+            RAIIAllocator allocator = nullptr;
         
             vk::raii::Queue graphicsQueue = nullptr;
             vk::raii::Queue presentQueue = nullptr;
@@ -92,7 +113,9 @@ namespace fw {
             std::vector<vk::raii::Framebuffer> swapChainFramebuffers;
         
             vk::raii::RenderPass renderPass = nullptr;
-            vk::raii::DescriptorSetLayout descriptorSetLayout = nullptr;
+            vk::raii::DescriptorSetLayout descriptorSetLayoutUBO = nullptr;
+            vk::raii::DescriptorSetLayout descriptorSetLayoutTextures = nullptr;
+            vk::raii::DescriptorSetLayout descriptorSetLayoutSSBO = nullptr;
             vk::raii::PipelineLayout pipelineLayout = nullptr;
             vk::raii::Pipeline graphicsPipeline = nullptr;
         
@@ -105,40 +128,32 @@ namespace fw {
             uint32_t currentFrame = 0;
             std::chrono::time_point<std::chrono::steady_clock> lastFrameTime = std::chrono::steady_clock::now();
         
-            vk::raii::Buffer stagingBuffer = nullptr;
-            vk::raii::DeviceMemory stagingBufferMemory = nullptr;
-            void* stagingBufferMemoryData;
-
-            vk::raii::Buffer vertexBuffer = nullptr;
-            vk::raii::DeviceMemory vertexBufferMemory = nullptr;
-            void* vertexBufferMemoryData;
-
-            vk::raii::Buffer indexBuffer = nullptr;
-            vk::raii::DeviceMemory indexBufferMemory = nullptr;
-            void* indexBufferMemoryData;
-
-            std::vector<vk::raii::Buffer> uniformBuffers;
-            std::vector<vk::raii::DeviceMemory> uniformBuffersMemory;
-            std::vector<void*> uniformBuffersMemoryData;
+            RAIIvmaBuffer stagingBuffer = nullptr;
+            RAIIvmaBuffer vertexBuffer = nullptr;
+            RAIIvmaBuffer indexBuffer = nullptr;
+            RAIIvmaBuffer ssboBuffer = nullptr;
+            std::vector<RAIIvmaBuffer> uniformBuffers;
 
             vk::raii::DescriptorPool descriptorPool = nullptr;
-            std::vector<vk::raii::DescriptorSet> descriptorSets;
+            std::vector<vk::raii::DescriptorSet> descriptorSetsUBO;
+            std::vector<vk::raii::DescriptorSet> descriptorSetsTextures;
+            std::vector<vk::raii::DescriptorSet> descriptorSetsSSBO;
+
+            vk::raii::Sampler textureSampler = nullptr;
+            std::vector<RAIIvmaImage> textures;
         
             std::set<int> pressedKeys;
             glm::vec2 cursorOffset;
             glm::vec2 prevOffset;
             float cameraSpeed = 1.0f;
             float mouseSensitivity = 1.0f;
-            bool rawMouseInput = false;
         
-            fw::Object camera = fw::Object({});
+            fw::Object camera;
             std::vector<fw::Object*> objects {};
         
             bool framebufferResized = false;
             bool shouldExit = false;
         
-            void initWindow();
-
             static void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
             {
                 Renderer* app = reinterpret_cast<Renderer*>(glfwGetWindowUserPointer(window));
@@ -155,13 +170,8 @@ namespace fw {
                 Renderer* app = reinterpret_cast<Renderer*>(glfwGetWindowUserPointer(window));
                 app->cursorOffset.x += xpos - app->prevOffset.x;
                 app->cursorOffset.y += ypos - app->prevOffset.y;
-                if (app->rawMouseInput) {
-                    app->prevOffset.x = 0;
-                    app->prevOffset.y = 0;
-                } else {
-                    app->prevOffset.x = xpos;
-                    app->prevOffset.y = ypos;
-                }
+                app->prevOffset.x = xpos;
+                app->prevOffset.y = ypos;
             }
 
             static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
@@ -169,18 +179,34 @@ namespace fw {
                 app->framebufferResized = true;
             }
 
+            void putObjectsToBuffer();
+            void initWindow();
             void initVulkan();
             void mainLoop();
             void cleanup();
+            bool checkValidationLayerSupport();
+            std::vector<const char*> getRequiredExtensions();
             void createInstance();
             void setupDebugMessenger();
             void createSurface();
+            QueueFamilyIndices findQueueFamilies(vk::raii::PhysicalDevice device);
+            bool checkDeviceExtensionSupport(vk::raii::PhysicalDevice device);
+            SwapChainSupportDetails querySwapChainSupport(vk::raii::PhysicalDevice device);
+            bool isDeviceSuitable(vk::raii::PhysicalDevice device);
             void pickPhysicalDevice();
             void createLogicalDevice();
+            void createBufferCopyHandler();
+            void createMemoryAllocator();
+            void createTextureSampler();
+            vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats);
+            vk::PresentModeKHR chooseSwapPresentMode(const std::vector<vk::PresentModeKHR>& availablePresentModes);
+            vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR& capabilities);
             void createSwapChain();
+            vk::raii::ImageView createImageView(const vk::Image& image, vk::Format format);
             void createImageViews();
             void createRenderPass();
             void createDescriptorSetLayout();
+            vk::raii::ShaderModule createShaderModule(const std::vector<char *>& code);
             void createGraphicsPipeline();
             void createFramebuffers();
             void createCommandPool();
@@ -188,31 +214,24 @@ namespace fw {
             void createVertexBuffer();
             void createIndexBuffer();
             void createUniformBuffers();
+            void createSSBOBuffer();
+            RAIIvmaImage createImage(uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties);
+            vk::raii::CommandBuffer beginSingleTimeCommands();
+            void endSingleTimeCommands(vk::raii::CommandBuffer& buffer);
+            void transitionImageLayout(const vk::Image& image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout);
+            uint32_t createTextureImage(const std::string& path);
             void createDescriptorPool();
             void createDescriptorSets();
+            uint32_t loadTextureToDescriptors(uint32_t textureIndex);
             void createCommandBuffers();
-            void recordCommandBuffer(uint32_t imageIndex, uint32_t bufferIndex);
             void createSyncObjects();
-            void drawFrame();
             void updateCameraPosition(float passedSeconds);
-            void updateUniformBuffer(uint32_t imageIndex);
-            void putObjectsToBuffer();
-            void copyStagingToIndexBuffer();
-            void copyStagingToVertexBuffer();
-            uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
             void recreateSwapChain();
-            vk::raii::ShaderModule createShaderModule(const std::vector<uint32_t>& code);
-            vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats);
-            vk::PresentModeKHR chooseSwapPresentMode(const std::vector<vk::PresentModeKHR>& availablePresentModes);
-            vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR& capabilities);
-            SwapChainSupportDetails querySwapChainSupport(vk::raii::PhysicalDevice device);
-            bool isDeviceSuitable(vk::raii::PhysicalDevice device);
-            bool checkDeviceExtensionSupport(vk::raii::PhysicalDevice device);
-            QueueFamilyIndices findQueueFamilies(vk::raii::PhysicalDevice device);
-            std::vector<const char*> getRequiredExtensions();
-            bool checkValidationLayerSupport();
+            void recordCommandBuffer(uint32_t imageIndex, uint32_t bufferIndex);
+            void updateUniformBuffer(uint32_t imageIndex);
+            void drawFrame();
 
-            static std::vector<uint32_t> readFile(const std::string& filename) {
+            static std::vector<char *> readFile(const std::string& filename) {
                 std::ifstream file(filename, std::ios::ate | std::ios::binary);
         
                 if (!file.is_open()) {
@@ -220,7 +239,7 @@ namespace fw {
                 }
         
                 size_t fileSize = (size_t) file.tellg();
-                std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t));
+                std::vector<char *> buffer(fileSize);
         
                 file.seekg(0);
                 file.read(reinterpret_cast<char *>(buffer.data()), fileSize);
@@ -230,7 +249,7 @@ namespace fw {
                 return buffer;
             }
         
-            static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) {
+            static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(vk::DebugUtilsMessageSeverityFlagBitsEXT messageSeverity, vk::DebugUtilsMessageTypeFlagsEXT messageType, const vk::DebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) {
                 std::cerr << "validation layer: " << pCallbackData->pMessage << std::endl;
         
                 return VK_FALSE;
