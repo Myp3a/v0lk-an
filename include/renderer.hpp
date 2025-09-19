@@ -1,7 +1,7 @@
 #pragma once
 
-#include <array>
 #include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <optional>
@@ -18,11 +18,11 @@
 
 #include <glm/glm.hpp>
 
-#include <objects.h>
-#include <raii_wrappers.h>
+#include <objects.hpp>
+#include <raii_wrappers.hpp>
 
 
-namespace fw {
+namespace volchara {
     const uint32_t WIDTH = 800;
     const uint32_t HEIGHT = 600;
 
@@ -45,7 +45,7 @@ namespace fw {
     };
 
     class Renderer {
-        friend class fw::Object;
+        friend class volchara::Object;
 
         uint32_t maxTextures = 64;
 
@@ -53,9 +53,11 @@ namespace fw {
             Renderer();
             void init();
             void run();
-            void addObject(fw::Object* obj);
-            void delObject(fw::Object* obj);
-            Square2D createSquare(std::array<float, 2> topLeft, std::array<float, 2> botRight, std::array<float, 3> color);
+            const std::filesystem::path& getResourceDir();
+            const std::string convertPathToString(const std::filesystem::path& path);
+            void addObject(volchara::Object* obj);
+            void delObject(volchara::Object* obj);
+            Plane createPlane(InitVerticesPlane vertices);
         
         private:
             const std::vector<const char*> validationLayers = {
@@ -148,8 +150,8 @@ namespace fw {
             float cameraSpeed = 1.0f;
             float mouseSensitivity = 1.0f;
         
-            fw::Object camera;
-            std::vector<fw::Object*> objects {};
+            volchara::Object camera;
+            std::vector<volchara::Object*> objects {};
         
             bool framebufferResized = false;
             bool shouldExit = false;
@@ -219,7 +221,7 @@ namespace fw {
             vk::raii::CommandBuffer beginSingleTimeCommands();
             void endSingleTimeCommands(vk::raii::CommandBuffer& buffer);
             void transitionImageLayout(const vk::Image& image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout);
-            uint32_t createTextureImage(const std::string& path);
+            uint32_t createTextureImage(const std::filesystem::path path);
             void createDescriptorPool();
             void createDescriptorSets();
             uint32_t loadTextureToDescriptors(uint32_t textureIndex);
@@ -231,7 +233,7 @@ namespace fw {
             void updateUniformBuffer(uint32_t imageIndex);
             void drawFrame();
 
-            static std::vector<char *> readFile(const std::string& filename) {
+            static std::vector<char *> readFile(const std::filesystem::path filename) {
                 std::ifstream file(filename, std::ios::ate | std::ios::binary);
         
                 if (!file.is_open()) {

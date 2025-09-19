@@ -1,9 +1,9 @@
 #define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
 #include <vulkan/vulkan_raii.hpp>
 
-#include <device_buffer_copy_handler.h>
+#include <device_buffer_copy_handler.hpp>
 
-namespace fw {
+namespace volchara {
     DeviceBufferCopyHandler::DeviceBufferCopyHandler(vk::raii::Device& dev, uint32_t queueFamilyIndex) {
         device = &dev;
         queue = device->getQueue(queueFamilyIndex, 0);

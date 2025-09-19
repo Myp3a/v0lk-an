@@ -1,0 +1,9 @@
+#pragma once
+
+namespace volchara {
+#if defined(_WIN32)
+inline constexpr const wchar_t* resourceDirPath = L"@RESOURCE_DIR@";
+#else
+inline constexpr const char* resourceDirPath = "@RESOURCE_DIR@";
+#endif
+}

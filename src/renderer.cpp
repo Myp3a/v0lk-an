@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <filesystem>
 #include <iostream>
 #include <iterator>
 #include <limits>
@@ -26,13 +27,29 @@
 #include <utility>
 #include <vector>
 
-#include <fw.h>
-#include <device_buffer_copy_handler.h>
-#include <objects.h>
-#include <raii_wrappers.h>
+#include <renderer.hpp>
+#include <device_buffer_copy_handler.hpp>
+#include <objects.hpp>
+#include <raii_wrappers.hpp>
+#include <resource_path.hpp>
 
 
-namespace fw {
+namespace volchara {
+
+    inline const std::filesystem::path& Renderer::getResourceDir() {
+        static const std::filesystem::path p{resourceDirPath};
+        return p;
+    }
+
+    inline const std::string Renderer::convertPathToString(const std::filesystem::path& path) {
+#if __cpp_char8_t
+        std::u8string u8 = path.u8string();     // char8_t string (C++20)
+        return std::string(u8.begin(), u8.end());
+#else
+        return path.u8string();                  // already std::string in C++17 lib
+#endif
+    }
+
     Renderer::Renderer() : camera(*this, {}) {
         init();
     }
@@ -47,30 +64,30 @@ namespace fw {
         cleanup();
     }
 
-    void Renderer::addObject(fw::Object* obj) {
+    void Renderer::addObject(volchara::Object* obj) {
         objects.push_back(obj);
         putObjectsToBuffer();
     }
 
-    void Renderer::delObject(fw::Object* obj) {
+    void Renderer::delObject(volchara::Object* obj) {
         objects.erase(std::find(objects.begin(), objects.end(), obj));
         putObjectsToBuffer();
     }
 
-    Square2D Renderer::createSquare(std::array<float, 2> topLeft, std::array<float, 2> botRight, std::array<float, 3> color) {
-        return Square2D(*this, topLeft, botRight, color);
+    Plane Renderer::createPlane(InitVerticesPlane vertices) {
+        return Plane(*this, vertices);
     }
 
     void Renderer::putObjectsToBuffer() {
-        std::vector<fw::Vertex> vertices;
+        std::vector<volchara::Vertex> vertices;
         std::vector<uint32_t> indices;
         uint32_t offset = 0;
-        for (fw::Object* obj : objects) {
+        for (volchara::Object* obj : objects) {
             vertices.insert(vertices.end(), obj->vertices.begin(), obj->vertices.end());
             std::transform(obj->indices.begin(), obj->indices.end(), std::back_inserter(indices), [offset](uint32_t index){return index + offset;});
             offset += obj->vertices.size();
         }
-        stagingBuffer.copyFrom(vertices.data(), (size_t)(vertices.size() * sizeof(fw::Vertex)));
+        stagingBuffer.copyFrom(vertices.data(), (size_t)(vertices.size() * sizeof(volchara::Vertex)));
         vertexBuffer.copyFrom(stagingBuffer.allocInfo().pMappedData, 8388608);
         stagingBuffer.copyFrom(indices.data(), (size_t)(indices.size() * sizeof(uint32_t)));
         indexBuffer.copyFrom(stagingBuffer.allocInfo().pMappedData, 8388608);
@@ -112,7 +129,7 @@ namespace fw {
         createIndexBuffer();
         createUniformBuffers();
         createSSBOBuffer();
-        uint32_t lisa = createTextureImage("textures/lisa.jpg");
+        uint32_t lisa = createTextureImage(getResourceDir() / "textures/lisa.jpg");
         createDescriptorPool();
         createDescriptorSets();
         loadTextureToDescriptors(lisa);
@@ -568,8 +585,8 @@ namespace fw {
     }
 
     void Renderer::createGraphicsPipeline() {
-        auto vertShaderCode = readFile("shaders/base.vert.spv");
-        auto fragShaderCode = readFile("shaders/base.frag.spv");
+        auto vertShaderCode = readFile(getResourceDir() / "shaders/base.vert.spv");
+        auto fragShaderCode = readFile(getResourceDir() / "shaders/base.frag.spv");
 
         vk::raii::ShaderModule vertShaderModule = createShaderModule(vertShaderCode);
         vk::raii::ShaderModule fragShaderModule = createShaderModule(fragShaderCode);
@@ -835,10 +852,10 @@ namespace fw {
         endSingleTimeCommands(buffer);
     }
 
-    uint32_t Renderer::createTextureImage(const std::string& path) {
+    uint32_t Renderer::createTextureImage(const std::filesystem::path path) {
         // TODO: deduplication
         int width, height, channels;
-        stbi_uc* pixels = stbi_load(path.c_str(), &width, &height, &channels, STBI_rgb_alpha);
+        stbi_uc* pixels = stbi_load((std::filesystem::path("../") / convertPathToString(path)).c_str(), &width, &height, &channels, STBI_rgb_alpha);
         vk::DeviceSize imageSize = width * height * STBI_rgb_alpha;
 
         if (!pixels) {
@@ -1130,7 +1147,7 @@ namespace fw {
 
         //for (fw::Object* obj : objects) {  // breaks 'cause reallocation
         for (int i = 0; i < objects.size(); i++) {
-            fw::Object* obj = objects[i];
+            volchara::Object* obj = objects[i];
             obj->runFrameCallbacks(
                 passedSeconds,
                 pressedKeys

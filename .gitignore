@@ -31,3 +31,5 @@ out/
 
 # clang-tidy output
 clang-tidy-fixes.patch
+
+compile_commands.json

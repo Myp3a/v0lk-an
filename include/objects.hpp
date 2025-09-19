@@ -2,7 +2,6 @@
 
 #include <array>
 #include <functional>
-#include <map>
 #include <vector>
 #include <set>
 #include <string>
@@ -15,8 +14,14 @@
 #include <glm/gtx/transform.hpp>
 #include <glm/gtx/quaternion.hpp>
 
-namespace fw {
+namespace volchara {
     class Renderer;
+
+    struct InitVerticesPlane {
+        std::array<float, 3> topLeft;
+        std::array<float, 3> topRight;
+        std::array<float, 3> botRight;
+    };
 
     struct UniformBufferObject {
         glm::mat4 view;
@@ -96,11 +101,11 @@ namespace fw {
         void setColor(std::array<float, 3> color);
         void loadTexture(const std::string& path);
     };
-    // class Triangle2D : public Object {};
-    class Square2D : public Object {
-    public:
-        static std::vector<Vertex> calcVertices(std::array<float, 2> topLeft, std::array<float, 2> botRight);
-        // Square2D(Renderer& renderer, std::array<float, 2> topLeft, std::array<float, 2> botRight, std::array<float, 3> color) : Object(renderer, calcVertices(topLeft, botRight));
-        Square2D(Renderer& renderer, std::array<float, 2> topLeft, std::array<float, 2> botRight, std::array<float, 3> color);
+
+    class Plane : public Object {
+        private:
+            static std::vector<Vertex> calcVertices(InitVerticesPlane initVertices);
+        public:
+            Plane(Renderer& renderer, InitVerticesPlane initVertices);
     };
 }

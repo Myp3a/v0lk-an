@@ -5,10 +5,10 @@
 #include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.hpp>
 
-#include <raii_wrappers.h>
-#include <device_buffer_copy_handler.h>
+#include <raii_wrappers.hpp>
+#include <device_buffer_copy_handler.hpp>
 
-namespace fw {
+namespace volchara {
     RAIIvmaBuffer::RAIIvmaBuffer(vk::raii::Device& dev, vma::Allocator& fromAllocator, vk::BufferCreateInfo bufferInfo, vma::AllocationCreateInfo allocInfo, DeviceBufferCopyHandler& handler) {
         this->dev = &dev;
         allocator = &fromAllocator;

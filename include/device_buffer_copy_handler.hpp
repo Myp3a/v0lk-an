@@ -2,7 +2,7 @@
 
 #include <vulkan/vulkan_raii.hpp>
 
-namespace fw {
+namespace volchara {
     class DeviceBufferCopyHandler {
         vk::raii::Device* device = nullptr;
         vk::raii::Queue queue = nullptr;

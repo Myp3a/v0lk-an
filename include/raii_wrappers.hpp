@@ -4,9 +4,9 @@
 #include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.hpp>
 
-#include <device_buffer_copy_handler.h>
+#include <device_buffer_copy_handler.hpp>
 
-namespace fw {
+namespace volchara {
     class RAIIvmaBuffer {
         private:
         vk::raii::Device* dev = nullptr;
