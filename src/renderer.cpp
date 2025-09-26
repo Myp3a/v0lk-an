@@ -1,4 +1,3 @@
-#define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 #include <vulkan/vulkan_raii.hpp>
@@ -6,7 +5,6 @@
 
 #include <GLFW/glfw3.h>
 
-#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
 
@@ -41,16 +39,7 @@ namespace volchara {
         return p;
     }
 
-    inline const std::string Renderer::convertPathToString(const std::filesystem::path& path) {
-#if __cpp_char8_t
-        std::u8string u8 = path.u8string();     // char8_t string (C++20)
-        return std::string(u8.begin(), u8.end());
-#else
-        return path.u8string();                  // already std::string in C++17 lib
-#endif
-    }
-
-    Renderer::Renderer() : camera(*this, {}) {
+    Renderer::Renderer() : camera(*this) {
         init();
     }
 
@@ -74,8 +63,8 @@ namespace volchara {
         putObjectsToBuffer();
     }
 
-    Plane Renderer::createPlane(InitVerticesPlane vertices) {
-        return Plane(*this, vertices);
+    Plane Renderer::objPlaneFromWorldCoordinates(InitVerticesPlane vertices) {
+        return Plane::fromWorldCoordinates(*this, vertices);
     }
 
     void Renderer::putObjectsToBuffer() {
@@ -122,13 +111,14 @@ namespace volchara {
         createRenderPass();
         createDescriptorSetLayout();
         createGraphicsPipeline();
-        createFramebuffers();
         createCommandPool();
         createStagingBuffer();
         createVertexBuffer();
         createIndexBuffer();
         createUniformBuffers();
         createSSBOBuffer();
+        createDepthResources();
+        createFramebuffers();
         uint32_t lisa = createTextureImage(getResourceDir() / "textures/lisa.jpg");
         createDescriptorPool();
         createDescriptorSets();
@@ -475,6 +465,27 @@ namespace volchara {
         }
     }
 
+    vk::Format Renderer::findSupportedFormat(const std::vector<vk::Format>& candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features) {
+        for (vk::Format format : candidates) {
+            vk::FormatProperties props(physicalDevice.getFormatProperties(format));
+            if (tiling == vk::ImageTiling::eLinear && (props.linearTilingFeatures & features) == features) {
+                return format;
+            }
+            else if (tiling == vk::ImageTiling::eOptimal && (props.optimalTilingFeatures & features) == features) {
+                return format;
+            }
+        }
+        throw std::runtime_error("failed to find supported depth format!");
+    }
+
+    vk::Format Renderer::findDepthFormat() {
+        return findSupportedFormat(
+            {vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint},
+            vk::ImageTiling::eOptimal,
+            vk::FormatFeatureFlagBits::eDepthStencilAttachment
+        );
+    }
+
     void Renderer::createRenderPass() {
         vk::AttachmentDescription colorAttachment{
             .format = swapChainImageFormat,
@@ -485,33 +496,47 @@ namespace volchara {
             .initialLayout = vk::ImageLayout::eUndefined,
             .finalLayout = vk::ImageLayout::ePresentSrcKHR,
         };
-
         vk::AttachmentReference colorAttachmentRef{
             .attachment = 0,
             .layout = vk::ImageLayout::eColorAttachmentOptimal,
         };
 
-        std::vector<vk::AttachmentReference> attachmentRefs {colorAttachmentRef};
+        vk::AttachmentDescription depthAttachment{
+            .format = findDepthFormat(),
+            .loadOp = vk::AttachmentLoadOp::eClear,
+            .storeOp = vk::AttachmentStoreOp::eDontCare,
+            .stencilLoadOp = vk::AttachmentLoadOp::eDontCare,
+            .stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
+            .initialLayout = vk::ImageLayout::eUndefined,
+            .finalLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal,
+        };
+        vk::AttachmentReference depthAttachmentRef{
+            .attachment = 1,
+            .layout = vk::ImageLayout::eDepthStencilAttachmentOptimal,
+        };
+
         vk::SubpassDescription subpass{
             .pipelineBindPoint = vk::PipelineBindPoint::eGraphics,
-            .colorAttachmentCount = static_cast<uint32_t>(attachmentRefs.size()),
-            .pColorAttachments = attachmentRefs.data(),
+            .colorAttachmentCount = 1,
+            .pColorAttachments = &colorAttachmentRef,
+            .pDepthStencilAttachment = &depthAttachmentRef,
         };
 
         vk::SubpassDependency dependency{
             .srcSubpass = vk::SubpassExternal,
             .dstSubpass = 0,
-            .srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput,
-            .dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput,
-            .dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
+            .srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eLateFragmentTests,
+            .dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests,
+            .srcAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite,
+            .dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite,
         };
 
-        std::vector<vk::AttachmentDescription> colorAttachmentVec { colorAttachment };
+        std::vector<vk::AttachmentDescription> attachmentDescriptions { colorAttachment, depthAttachment };
         std::vector<vk::SubpassDescription> subpassVec { subpass };
         std::vector<vk::SubpassDependency> dependencyVec { dependency };
         vk::RenderPassCreateInfo renderPassInfo{
-            .attachmentCount = static_cast<uint32_t>(colorAttachmentVec.size()),
-            .pAttachments = colorAttachmentVec.data(),
+            .attachmentCount = static_cast<uint32_t>(attachmentDescriptions.size()),
+            .pAttachments = attachmentDescriptions.data(),
             .subpassCount = static_cast<uint32_t>(subpassVec.size()),
             .pSubpasses = subpassVec.data(),
             .dependencyCount = static_cast<uint32_t>(dependencyVec.size()),
@@ -652,6 +677,12 @@ namespace volchara {
             .pDynamicStates = dynamicStates.data(),
         };
 
+        vk::PipelineDepthStencilStateCreateInfo depthStencil{
+            .depthTestEnable = true,
+            .depthWriteEnable = true,
+            .depthCompareOp = vk::CompareOp::eGreater,
+        };
+
         vk::PushConstantRange pushConstantRange{
             .stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
             .size = sizeof(PushConstants),
@@ -675,6 +706,7 @@ namespace volchara {
             .pViewportState = &viewportState,
             .pRasterizationState = &rasterizer,
             .pMultisampleState = &multisampling,
+            .pDepthStencilState = &depthStencil,
             .pColorBlendState = &colorBlending,
             .pDynamicState = &dynamicState,
             .layout = pipelineLayout,
@@ -682,21 +714,6 @@ namespace volchara {
         };
 
         graphicsPipeline = device.createGraphicsPipeline(nullptr, pipelineInfo);
-    }
-
-    void Renderer::createFramebuffers() {
-        swapChainFramebuffers.clear();
-        for (size_t i = 0; i < swapChainImageViews.size(); i++) {
-            vk::FramebufferCreateInfo framebufferInfo{
-                .renderPass = renderPass,
-                .attachmentCount = 1,
-                .pAttachments = &*swapChainImageViews[i],
-                .width = swapChainExtent.width,
-                .height = swapChainExtent.height,
-                .layers = 1,
-            };
-            swapChainFramebuffers.push_back(device.createFramebuffer(framebufferInfo));
-        }
     }
 
     void Renderer::createCommandPool() {
@@ -777,7 +794,7 @@ namespace volchara {
         ssboBuffer = allocator.createBuffer(bufferInfo, allocInfo);
     }
 
-    RAIIvmaImage Renderer::createImage(uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties) {
+    RAIIvmaImage Renderer::createImage(uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties, vk::ImageAspectFlags aspectFlags) {
         vk::ImageCreateInfo imageInfo{
             .imageType = vk::ImageType::e2D,
             .format = format,
@@ -791,7 +808,7 @@ namespace volchara {
         vma::AllocationCreateInfo allocInfo{
             .usage = vma::MemoryUsage::eAuto,
         };
-        RAIIvmaImage image = allocator.createImage(imageInfo, allocInfo);
+        RAIIvmaImage image = allocator.createImage(imageInfo, allocInfo, aspectFlags);
         return image;
     }
 
@@ -834,8 +851,21 @@ namespace volchara {
             dstStage = vk::PipelineStageFlagBits::eFragmentShader;
             srcMask = vk::AccessFlagBits::eTransferWrite;
             dstMask = vk::AccessFlagBits::eShaderRead;
+        } else if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eDepthStencilAttachmentOptimal) {
+            srcStage = vk::PipelineStageFlagBits::eTopOfPipe;
+            dstStage = vk::PipelineStageFlagBits::eEarlyFragmentTests;
+            srcMask = vk::AccessFlagBits::eNone;
+            dstMask = vk::AccessFlagBits::eDepthStencilAttachmentRead | vk::AccessFlagBits::eDepthStencilAttachmentWrite;
         } else {
             throw std::runtime_error("unsupported transition");
+        }
+
+        vk::ImageAspectFlags aspectMask;
+        if (newLayout == vk::ImageLayout::eDepthStencilAttachmentOptimal) {
+            aspectMask = vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil;
+        }
+        else {
+            aspectMask = vk::ImageAspectFlagBits::eColor;
         }
         vk::raii::CommandBuffer buffer(beginSingleTimeCommands());
         vk::ImageMemoryBarrier barrier{
@@ -846,16 +876,39 @@ namespace volchara {
             .srcQueueFamilyIndex = vk::QueueFamilyIgnored,
             .dstQueueFamilyIndex = vk::QueueFamilyIgnored,
             .image = image,
-            .subresourceRange = {.aspectMask = vk::ImageAspectFlagBits::eColor, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1},
+            .subresourceRange = {.aspectMask = aspectMask, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1},
         };
         buffer.pipelineBarrier(srcStage, dstStage, vk::DependencyFlagBits::eByRegion, nullptr, nullptr, barrier);
         endSingleTimeCommands(buffer);
     }
 
+    void Renderer::createDepthResources() {
+        vk::Format depthFormat = findDepthFormat();
+        depthBuffer = createImage(swapChainExtent.width, swapChainExtent.height, depthFormat, vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eDepthStencilAttachment, vk::MemoryPropertyFlagBits::eDeviceLocal, vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil);
+        transitionImageLayout(depthBuffer, depthFormat, vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthStencilAttachmentOptimal);
+    }
+
+    void Renderer::createFramebuffers() {
+        swapChainFramebuffers.clear();
+        for (size_t i = 0; i < swapChainImageViews.size(); i++) {
+            std::array<const vk::ImageView, 2> attachments{*swapChainImageViews[i], depthBuffer.imageView()};
+            vk::FramebufferCreateInfo framebufferInfo{
+                .renderPass = renderPass,
+                .attachmentCount = attachments.size(),
+                .pAttachments = attachments.data(),
+                .width = swapChainExtent.width,
+                .height = swapChainExtent.height,
+                .layers = 1,
+            };
+            swapChainFramebuffers.push_back(device.createFramebuffer(framebufferInfo));
+        }
+    }
+
     uint32_t Renderer::createTextureImage(const std::filesystem::path path) {
         // TODO: deduplication
         int width, height, channels;
-        stbi_uc* pixels = stbi_load((std::filesystem::path("../") / convertPathToString(path)).c_str(), &width, &height, &channels, STBI_rgb_alpha);
+        std::vector<char *> texture = readFile(path);
+        stbi_uc* pixels = stbi_load_from_memory(reinterpret_cast<unsigned char*>(texture.data()), texture.size(), &width, &height, &channels, STBI_rgb_alpha);
         vk::DeviceSize imageSize = width * height * STBI_rgb_alpha;
 
         if (!pixels) {
@@ -1052,7 +1105,7 @@ namespace volchara {
         if (pressedKeys.contains(GLFW_KEY_E)) {
             camera.transform.position.up(passedSeconds * cameraSpeed, true);
         }
-        camera.transform.rotation.up(cursorOffset.y * mouseSensitivity * 0.0001f);
+        camera.transform.rotation.up(-cursorOffset.y * mouseSensitivity * 0.0001f);
         camera.transform.rotation.right(cursorOffset.x * mouseSensitivity * 0.0001f, true);
         cursorOffset.x = 0;
         cursorOffset.y = 0;
@@ -1070,6 +1123,7 @@ namespace volchara {
 
         createSwapChain();
         createImageViews();
+        createDepthResources();
         createFramebuffers();
     }
 
@@ -1083,13 +1137,15 @@ namespace volchara {
         vk::Rect2D renderArea{
             .extent = swapChainExtent,
         };
-        vk::ClearValue clearValue({0.0f, 0.0f, 0.0f, 1.0f});
+        vk::ClearValue clearValueColor({0.0f, 0.0f, 0.0f, 1.0f});
+        vk::ClearValue clearValueDepth({0.0f, 0});
+        std::array<vk::ClearValue, 2> clearValues{clearValueColor, clearValueDepth};
         vk::RenderPassBeginInfo renderPassInfo{
             .renderPass = renderPass,
             .framebuffer = swapChainFramebuffers[imageIndex],
             .renderArea = renderArea,
-            .clearValueCount = 1,
-            .pClearValues = &clearValue,
+            .clearValueCount = clearValues.size(),
+            .pClearValues = clearValues.data(),
         };
 
         commandBuffers[bufferIndex].beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
@@ -1100,8 +1156,10 @@ namespace volchara {
             {0}
         );
         vk::Viewport viewport{
+            .x = 0,
+            .y = static_cast<float>(swapChainExtent.height),
             .width = static_cast<float>(swapChainExtent.width),
-            .height = static_cast<float>(swapChainExtent.height),
+            .height = -static_cast<float>(swapChainExtent.height),
             .maxDepth = 1,
         };
         commandBuffers[bufferIndex].bindIndexBuffer(indexBuffer, 0, vk::IndexType::eUint32);
@@ -1130,7 +1188,14 @@ namespace volchara {
     void Renderer::updateUniformBuffer(uint32_t imageIndex) {
         UniformBufferObject ubo{};
         ubo.view = glm::inverse(camera.transform.modelMatrix());
-        ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);
+        float const fovMult = 1.0f / tan(glm::radians(45.0f) / 2.0f);
+        float const aspect = swapChainExtent.width / (float)swapChainExtent.height;
+        ubo.proj = glm::mat4(
+            fovMult / aspect,    0.0f,  0.0f,  0.0f,
+                        0.0f, fovMult,  0.0f,  0.0f,
+                        0.0f,    0.0f,  0.0f, -1.0f,
+                        0.0f,    0.0f, 0.01f,  0.0f
+        );
         uniformBuffers[imageIndex].copyFrom(&ubo, sizeof(ubo));
     }
 

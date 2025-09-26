@@ -1,7 +1,6 @@
 #include <algorithm>
 #include <utility>
 
-#define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
 #include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.hpp>
 
@@ -70,7 +69,7 @@ namespace volchara {
         std::swap(lhs.copyHandler, rhs.copyHandler);
     }
 
-    RAIIvmaImage::RAIIvmaImage(vk::raii::Device& dev, vma::Allocator& fromAllocator, vk::ImageCreateInfo imageInfo, vma::AllocationCreateInfo allocInfo, DeviceBufferCopyHandler& handler) {
+    RAIIvmaImage::RAIIvmaImage(vk::raii::Device& dev, vma::Allocator& fromAllocator, vk::ImageCreateInfo imageInfo, vma::AllocationCreateInfo allocInfo, DeviceBufferCopyHandler& handler, vk::ImageAspectFlags aspectFlags) {
         this->dev = &dev;
         allocator = &fromAllocator;
         std::pair<vk::Image, vma::Allocation> p = allocator->createImage(imageInfo, allocInfo);
@@ -82,7 +81,7 @@ namespace volchara {
             .viewType = vk::ImageViewType::e2D,
             .format = imageInfo.format,
             .subresourceRange = {
-                .aspectMask = vk::ImageAspectFlagBits::eColor,
+                .aspectMask = aspectFlags,
                 .baseMipLevel = 0,
                 .levelCount = 1,
                 .baseArrayLayer = 0,
@@ -176,7 +175,7 @@ namespace volchara {
     RAIIvmaBuffer RAIIAllocator::createBuffer(vk::BufferCreateInfo bufferInfo, vma::AllocationCreateInfo allocInfo) {
         return RAIIvmaBuffer(*dev, vmaAlloc, bufferInfo, allocInfo, *copyHandler);
     }
-    RAIIvmaImage RAIIAllocator::createImage(vk::ImageCreateInfo imageInfo, vma::AllocationCreateInfo allocInfo) {
-        return RAIIvmaImage(*dev, vmaAlloc, imageInfo, allocInfo, *copyHandler);
+    RAIIvmaImage RAIIAllocator::createImage(vk::ImageCreateInfo imageInfo, vma::AllocationCreateInfo allocInfo, vk::ImageAspectFlags aspectFlags) {
+        return RAIIvmaImage(*dev, vmaAlloc, imageInfo, allocInfo, *copyHandler, aspectFlags);
     }
 }

@@ -9,7 +9,6 @@
 #include <string>
 #include <vector>
 
-#define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 #include <vulkan/vulkan_raii.hpp>
@@ -54,26 +53,28 @@ namespace volchara {
             void init();
             void run();
             const std::filesystem::path& getResourceDir();
-            const std::string convertPathToString(const std::filesystem::path& path);
             void addObject(volchara::Object* obj);
             void delObject(volchara::Object* obj);
-            Plane createPlane(InitVerticesPlane vertices);
+            Plane objPlaneFromWorldCoordinates(InitVerticesPlane vertices);
         
         private:
             const std::vector<const char*> validationLayers = {
                 "VK_LAYER_KHRONOS_validation"
             };
+            #if __APPLE__
             const std::vector<const char*> instanceExtensions = {
                 VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
                 VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
             };
-            #if __APPLE__
             const std::vector<const char*> deviceExtensions = {
                 VK_KHR_SWAPCHAIN_EXTENSION_NAME,
                 VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
                 VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
             };
             #else
+            const std::vector<const char*> instanceExtensions = {
+                VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME
+            };
             const std::vector<const char*> deviceExtensions = {
                 VK_KHR_SWAPCHAIN_EXTENSION_NAME,
                 VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
@@ -135,6 +136,7 @@ namespace volchara {
             RAIIvmaBuffer indexBuffer = nullptr;
             RAIIvmaBuffer ssboBuffer = nullptr;
             std::vector<RAIIvmaBuffer> uniformBuffers;
+            RAIIvmaImage depthBuffer = nullptr;
 
             vk::raii::DescriptorPool descriptorPool = nullptr;
             std::vector<vk::raii::DescriptorSet> descriptorSetsUBO;
@@ -150,7 +152,7 @@ namespace volchara {
             float cameraSpeed = 1.0f;
             float mouseSensitivity = 1.0f;
         
-            volchara::Object camera;
+            volchara::Camera camera;
             std::vector<volchara::Object*> objects {};
         
             bool framebufferResized = false;
@@ -206,21 +208,24 @@ namespace volchara {
             void createSwapChain();
             vk::raii::ImageView createImageView(const vk::Image& image, vk::Format format);
             void createImageViews();
+            vk::Format findSupportedFormat(const std::vector<vk::Format>& candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features);
+            vk::Format findDepthFormat();
             void createRenderPass();
             void createDescriptorSetLayout();
             vk::raii::ShaderModule createShaderModule(const std::vector<char *>& code);
             void createGraphicsPipeline();
-            void createFramebuffers();
             void createCommandPool();
             void createStagingBuffer();
             void createVertexBuffer();
             void createIndexBuffer();
             void createUniformBuffers();
             void createSSBOBuffer();
-            RAIIvmaImage createImage(uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties);
+            RAIIvmaImage createImage(uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties, vk::ImageAspectFlags aspectFlags = vk::ImageAspectFlagBits::eColor);
             vk::raii::CommandBuffer beginSingleTimeCommands();
             void endSingleTimeCommands(vk::raii::CommandBuffer& buffer);
             void transitionImageLayout(const vk::Image& image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout);
+            void createDepthResources();
+            void createFramebuffers();
             uint32_t createTextureImage(const std::filesystem::path path);
             void createDescriptorPool();
             void createDescriptorSets();

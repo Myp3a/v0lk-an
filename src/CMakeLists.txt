@@ -1,6 +1,8 @@
 add_library(volchara renderer.cpp objects.cpp raii_wrappers.cpp device_buffer_copy_handler.cpp extlibs/vma/vk_mem_alloc.cpp)
 target_include_directories(volchara PUBLIC ../include)
 
+target_compile_definitions(volchara PUBLIC VULKAN_HPP_NO_STRUCT_CONSTRUCTORS PUBLIC GLM_ENABLE_EXPERIMENTAL PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
+
 include(../cmake/CPM.cmake)
 include(../cmake/compile_shaders.cmake)
 include(../cmake/copy_resources.cmake)

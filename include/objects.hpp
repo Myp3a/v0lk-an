@@ -1,14 +1,11 @@
 #pragma once
 
 #include <array>
+#include <filesystem>
 #include <functional>
 #include <vector>
 #include <set>
-#include <string>
 
-#define GLM_ENABLE_EXPERIMENTAL
-
-#define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
 #include <vulkan/vulkan_raii.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
@@ -86,6 +83,11 @@ namespace volchara {
         glm::mat4 modelMatrix();
     };
 
+    class CameraTransform : public Transform {
+        public:
+            glm::mat4 modelMatrix();
+    };
+
     class Object {
     public:
         std::vector<Vertex> vertices;
@@ -93,19 +95,25 @@ namespace volchara {
         std::vector<std::function<void(Object*, float, std::set<int>)>> frameCallbacks{};
         Transform transform;
         Renderer* renderer;
-        uint32_t textureIndex;
+        uint32_t textureIndex = 0;
 
-        Object(Renderer &renderer, std::vector<Vertex> initVertices);
+        Object(Renderer &renderer, std::vector<Vertex> initVertices, glm::vec3 translation = {0, 0, 0}, glm::vec3 scaling = {1, 1, 1}, glm::quat rotation = {1,0,0,0});
         virtual ~Object() = default;  // for RTTI and callback polymorphism
         void runFrameCallbacks(float passedSeconds, std::set<int> pressedKeys);
         void setColor(std::array<float, 3> color);
-        void loadTexture(const std::string& path);
+        void loadTexture(const std::filesystem::path path);
+    };
+
+    class Camera : public Object {
+        public:
+            Camera(Renderer& renderer) : Object(renderer, {}) {
+                transform.rotationQuat = glm::toQuat(glm::lookAt(glm::vec3{0, 0, 1}, {0, 0, 0}, {0, 1, 0}));
+            }
     };
 
     class Plane : public Object {
-        private:
-            static std::vector<Vertex> calcVertices(InitVerticesPlane initVertices);
         public:
-            Plane(Renderer& renderer, InitVerticesPlane initVertices);
+            static Plane fromWorldCoordinates(Renderer& renderer, InitVerticesPlane initVertices);
+            Plane(Renderer& renderer, std::vector<Vertex> vertices, glm::vec3 translation = {0, 0, 0}, glm::vec3 scaling = {1, 1, 1}, glm::quat rotation = {1,0,0,0}) : Object(renderer, vertices, translation, scaling, rotation) {};
     };
 }

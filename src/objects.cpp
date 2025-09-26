@@ -1,12 +1,10 @@
 #include <algorithm>
 #include <array>
+#include <filesystem>
 #include <map>
 #include <set>
 #include <vector>
 
-#define GLM_ENABLE_EXPERIMENTAL
-
-#define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
 #include <vulkan/vulkan_raii.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
@@ -87,9 +85,9 @@ namespace volchara {
 
     void Transform::Position::forward(float distance, bool world) {
         if (world) {
-            parent->translation -= glm::vec3(0, 0, distance);
+            parent->translation += glm::vec3(0, 0, -distance);
         } else {
-            parent->translation -= parent->rotationQuat * glm::vec3(0, 0, distance);
+            parent->translation += parent->rotationQuat * glm::vec3(0, 0, -distance);
         }
     }
     void Transform::Position::backward(float distance, bool world) {
@@ -97,9 +95,9 @@ namespace volchara {
     }
     void Transform::Position::left(float distance, bool world) {
         if (world) {
-            parent->translation -= glm::vec3(distance, 0, 0);
+            parent->translation += glm::vec3(-distance, 0, 0);
         } else {
-            parent->translation -= parent->rotationQuat * glm::vec3(distance, 0, 0);
+            parent->translation += parent->rotationQuat * glm::vec3(-distance, 0, 0);
         }
     }
     void Transform::Position::right(float distance, bool world) {
@@ -107,9 +105,9 @@ namespace volchara {
     }
     void Transform::Position::up(float distance, bool world) {
         if (world) {
-            parent->translation -= glm::vec3(0, distance, 0);
+            parent->translation += glm::vec3(0, distance, 0);
         } else {
-            parent->translation -= parent->rotationQuat * glm::vec3(0, distance, 0);
+            parent->translation += parent->rotationQuat * glm::vec3(0, distance, 0);
         }
     }
     void Transform::Position::down(float distance, bool world) {
@@ -136,15 +134,15 @@ namespace volchara {
     void Transform::Rotation::right(float degrees, bool world) {
         left(-degrees, world);
     }
-    void Transform::Rotation::ccw(float degrees, bool world) {
+    void Transform::Rotation::cw(float degrees, bool world) {
         if (world) {
-            parent->rotationQuat = glm::normalize(glm::quat({0, 0, degrees}) * parent->rotationQuat);
+            parent->rotationQuat = glm::normalize(glm::quat({0, 0, -degrees}) * parent->rotationQuat);
         } else {
-            parent->rotationQuat = glm::normalize(parent->rotationQuat * glm::quat({0, 0, degrees}));
+            parent->rotationQuat = glm::normalize(parent->rotationQuat * glm::quat({0, 0, -degrees}));
         }
     }
-    void Transform::Rotation::cw(float degrees, bool world) {
-        ccw(-degrees, world);
+    void Transform::Rotation::ccw(float degrees, bool world) {
+        cw(-degrees, world);
     }
 
     glm::mat4 Transform::modelMatrix() {
@@ -155,7 +153,7 @@ namespace volchara {
         return result;
     }
 
-    Object::Object(Renderer& renderer, std::vector<Vertex> initVertices) {
+    Object::Object(Renderer& renderer, std::vector<Vertex> initVertices, glm::vec3 translation, glm::vec3 scaling, glm::quat rotation) {
         this->renderer = &renderer;
         std::map<Vertex, int32_t> indexMap;
         for (Vertex v : initVertices) {
@@ -168,6 +166,9 @@ namespace volchara {
                 indices.push_back(pos->second);
             }
         }
+        transform.translation = translation;
+        transform.scaling = scaling;
+        transform.rotationQuat = rotation;
     }
     void Object::runFrameCallbacks(float passedSeconds, std::set<int> pressedKeys) {
         for (auto callback : frameCallbacks) {
@@ -182,27 +183,29 @@ namespace volchara {
             v.color.b = color[2];
         }
     }
-    void Object::loadTexture(const std::string& path) {
+    void Object::loadTexture(const std::filesystem::path path) {
         textureIndex = renderer->createTextureImage(path);
         renderer->loadTextureToDescriptors(textureIndex);
     }
 
-    std::vector<Vertex> Plane::calcVertices(InitVerticesPlane initVertices) {
+    Plane Plane::fromWorldCoordinates(Renderer& renderer, InitVerticesPlane initVertices) {
         std::vector<Vertex> vertices;
         glm::vec3 topLeft = {initVertices.topLeft[0], initVertices.topLeft[1], initVertices.topLeft[2]};
         glm::vec3 topRight = {initVertices.topRight[0], initVertices.topRight[1], initVertices.topRight[2]};
         glm::vec3 botRight = {initVertices.botRight[0], initVertices.botRight[1], initVertices.botRight[2]};
         glm::vec3 botLeft = topLeft - (topRight - botRight);
-        vertices.push_back({.pos = topLeft, .texCoord = {0, 0}});
-        vertices.push_back({.pos = topRight, .texCoord = {1, 0}});
-        vertices.push_back({.pos = botRight, .texCoord = {1, 1}});
-        vertices.push_back({.pos = topLeft, .texCoord = {0, 0}});
-        vertices.push_back({.pos = botRight, .texCoord = {1, 1}});
-        vertices.push_back({.pos = botLeft, .texCoord = {0, 1}});
-        return vertices;
-    }
-
-    Plane::Plane(Renderer& renderer, InitVerticesPlane initVertices) : Object(renderer, calcVertices(initVertices)) {
-        // setColor(color);
+        glm::vec3 x = topRight - topLeft;
+        glm::vec3 y = topLeft - botLeft;
+        glm::vec3 z = glm::cross(x, y);
+        glm::vec3 center = botLeft + x / 2.0f + y / 2.0f;
+        float width = glm::length(x);
+        float height = glm::length(y);
+        vertices.push_back({.pos = {-width / 2.0f, height / 2.0f, 0}, .texCoord = {1, 0}});
+        vertices.push_back({.pos = {width / 2.0f, -height / 2.0f, 0}, .texCoord = {0, 1}});
+        vertices.push_back({.pos = {width / 2.0f, height / 2.0f, 0}, .texCoord = {0, 0}});
+        vertices.push_back({.pos = {-width / 2.0f, height / 2.0f, 0}, .texCoord = {1, 0}});
+        vertices.push_back({.pos = {-width / 2.0f, -height / 2.0f, 0}, .texCoord = {1, 1}});
+        vertices.push_back({.pos = {width / 2.0f, -height / 2.0f, 0}, .texCoord = {0, 1}});
+        return Plane(renderer, vertices, center, {1, 1, 1}, glm::quatLookAtRH(glm::normalize(z), y));
     }
 }

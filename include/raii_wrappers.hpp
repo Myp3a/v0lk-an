@@ -1,6 +1,5 @@
 #pragma once
 
-#define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
 #include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.hpp>
 
@@ -41,7 +40,7 @@ namespace volchara {
         DeviceBufferCopyHandler* copyHandler = nullptr;
         vk::Extent3D imageExtent;
         public:
-        RAIIvmaImage(vk::raii::Device& dev, vma::Allocator& fromAllocator, vk::ImageCreateInfo imageInfo, vma::AllocationCreateInfo allocInfo, DeviceBufferCopyHandler& handler);
+        RAIIvmaImage(vk::raii::Device& dev, vma::Allocator& fromAllocator, vk::ImageCreateInfo imageInfo, vma::AllocationCreateInfo allocInfo, DeviceBufferCopyHandler& handler, vk::ImageAspectFlags aspectFlags);
         RAIIvmaImage(nullptr_t) {}
         ~RAIIvmaImage();
         RAIIvmaImage(RAIIvmaImage&) = delete;
@@ -70,6 +69,6 @@ namespace volchara {
         const RAIIAllocator& operator=(RAIIAllocator&& other);
 
         RAIIvmaBuffer createBuffer(vk::BufferCreateInfo bufferInfo, vma::AllocationCreateInfo allocInfo);
-        RAIIvmaImage createImage(vk::ImageCreateInfo imageInfo, vma::AllocationCreateInfo allocInfo);
+        RAIIvmaImage createImage(vk::ImageCreateInfo imageInfo, vma::AllocationCreateInfo allocInfo, vk::ImageAspectFlags aspectFlags);
     };
 }
