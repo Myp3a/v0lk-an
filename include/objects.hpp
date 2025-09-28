@@ -32,11 +32,10 @@ namespace volchara {
 
     struct Vertex {
         glm::vec3 pos;
-        glm::vec3 color;
+        glm::vec3 color{0, 0, 0};
         glm::vec2 texCoord;
 
         bool operator==(const Vertex& other) const;
-        bool operator<(const Vertex& other) const;
         static vk::VertexInputBindingDescription getBindingDescription();
         static std::vector<vk::VertexInputAttributeDescription> getAttributeDescriptions();
     };
@@ -96,12 +95,14 @@ namespace volchara {
         Transform transform;
         Renderer* renderer;
         uint32_t textureIndex = 0;
+        uint32_t maxVertexIndex = 0;
 
-        Object(Renderer &renderer, std::vector<Vertex> initVertices, glm::vec3 translation = {0, 0, 0}, glm::vec3 scaling = {1, 1, 1}, glm::quat rotation = {1,0,0,0});
+        Object(Renderer &renderer, std::vector<Vertex> initVertices, std::vector<uint32_t> initIndices = {}, glm::vec3 translation = {0, 0, 0}, glm::vec3 scaling = {1, 1, 1}, glm::quat rotation = {1,0,0,0});
         virtual ~Object() = default;  // for RTTI and callback polymorphism
         void runFrameCallbacks(float passedSeconds, std::set<int> pressedKeys);
         void setColor(std::array<float, 3> color);
         void loadTexture(const std::filesystem::path path);
+        void generateIndices(std::vector<Vertex> fromVertices);
     };
 
     class Camera : public Object {
@@ -114,6 +115,12 @@ namespace volchara {
     class Plane : public Object {
         public:
             static Plane fromWorldCoordinates(Renderer& renderer, InitVerticesPlane initVertices);
-            Plane(Renderer& renderer, std::vector<Vertex> vertices, glm::vec3 translation = {0, 0, 0}, glm::vec3 scaling = {1, 1, 1}, glm::quat rotation = {1,0,0,0}) : Object(renderer, vertices, translation, scaling, rotation) {};
+            Plane(Renderer& renderer, std::vector<Vertex> vertices, std::vector<uint32_t> indices = {}, glm::vec3 translation = {0, 0, 0}, glm::vec3 scaling = {1, 1, 1}, glm::quat rotation = {1,0,0,0}) : Object(renderer, vertices, indices, translation, scaling, rotation) {};
+    };
+
+    class GLTFModel : public Object {
+        public:
+            static GLTFModel fromFile(Renderer& renderer, std::filesystem::path modelPath);
+            GLTFModel(Renderer& renderer, std::vector<Vertex> vertices, std::vector<uint32_t> indices = {}, glm::vec3 translation = {0, 0, 0}, glm::vec3 scaling = {1, 1, 1}, glm::quat rotation = {1,0,0,0}) : Object(renderer, vertices, indices, translation, scaling, rotation) {};
     };
 }

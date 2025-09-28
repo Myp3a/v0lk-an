@@ -26,15 +26,18 @@ void mvmnt(volchara::Object* obj, float passedSeconds, std::set<int> pressedKeys
 
 int main() {
     std::this_thread::sleep_for(std::chrono::seconds(2));  //screw xcode
-    volchara::Plane obj1 = renderer.objPlaneFromWorldCoordinates({{-0.3f, 0.5f, 0.01f}, {0.3f, 0.5f, 0.01f}, {0.3f, -0.5f, 0.01f}});
-    volchara::Plane obj2 = renderer.objPlaneFromWorldCoordinates({{0.0f, 0.2f, 0.0f}, {0.5f, 0.2f, 0.0f}, {0.5f, -0.4f, 0.0f}});
-    volchara::Plane obj3 = renderer.objPlaneFromWorldCoordinates({{0.3f, 0.8f, -0.3f}, {0.5f, 0.8f, -0.3f}, {0.5f, -0.1f, -0.3f}});
-    obj2.loadTexture(renderer.getResourceDir() / "textures/nouwu.jpg");
-    obj3.loadTexture(renderer.getResourceDir() / "textures/ovca.png");
-    obj3.frameCallbacks.push_back(mvmnt);
-    renderer.addObject(&obj1);
-    renderer.addObject(&obj2);
-    renderer.addObject(&obj3);
+    // volchara::Plane obj1 = renderer.objPlaneFromWorldCoordinates({{-0.3f, 0.5f, 0.01f}, {0.3f, 0.5f, 0.01f}, {0.3f, -0.5f, 0.01f}});
+    // volchara::Plane obj2 = renderer.objPlaneFromWorldCoordinates({{0.0f, 0.2f, 0.0f}, {0.5f, 0.2f, 0.0f}, {0.5f, -0.4f, 0.0f}});
+    // volchara::Plane obj3 = renderer.objPlaneFromWorldCoordinates({{0.3f, 0.8f, -0.3f}, {0.5f, 0.8f, -0.3f}, {0.5f, -0.1f, -0.3f}});
+    // obj2.loadTexture(renderer.getResourceDir() / "textures/nouwu.jpg");
+    // obj3.loadTexture(renderer.getResourceDir() / "textures/ovca.png");
+    // obj3.frameCallbacks.push_back(mvmnt);
+    // renderer.addObject(&obj1);
+    // renderer.addObject(&obj2);
+    // renderer.addObject(&obj3);
+    volchara::GLTFModel fisch = renderer.objGLTFModelFromFile(renderer.getResourceDir() / "models/fisch/fisch.gltf");
+    fisch.frameCallbacks.push_back(mvmnt);
+    renderer.addObject(&fisch);
     renderer.run();
     return 0;
 }

@@ -1,46 +1,40 @@
-#include <algorithm>
 #include <array>
 #include <filesystem>
-#include <map>
+#include <numeric>
 #include <set>
+#include <unordered_map>
 #include <vector>
 
 #include <vulkan/vulkan_raii.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
 #include <glm/gtx/quaternion.hpp>
+#include <glm/gtx/hash.hpp>
 #include <stb_image.h>
+#include <tiny_gltf.h>
 
 #include <objects.hpp>
 #include <renderer.hpp>
 
 
 namespace volchara {
-    bool Vertex::operator==(const Vertex& other) const {
-        return ((pos == other.pos) && (color == other.color));
+    template<class T>
+    inline void hash_combine(std::size_t& seed, T const& v) noexcept {
+        seed ^= std::hash<T>{}(v) + 0x9e3779b97f4a7c15ull + (seed<<6) + (seed>>2);
     }
-    bool Vertex::operator<(const Vertex& other) const {
-        if (pos.x < other.pos.x) return true;
-        if (pos.x > other.pos.x) return false;
-        if (pos.x == other.pos.x) {
-            if (pos.y < other.pos.y) return true;
-            if (pos.y > other.pos.y) return false;
-            if (pos.y == other.pos.y) {
-                if (color.r < other.color.r) return true;
-                if (color.r > other.color.r) return false;
-                if (color.r == other.color.r) {
-                    if (color.g < other.color.g) return true;
-                    if (color.g > other.color.g) return false;
-                    if (color.g == other.color.g) {
-                        if (color.b < other.color.b) return true;
-                        if (color.b > other.color.b) return false;
-                        if (color.b == other.color.b) {
-                            return false;
-                        }
-                    }
-                }
-            }
+
+    struct VertexHash {
+        std::size_t operator()(Vertex const& v) const {
+            std::size_t seed = 0;
+            hash_combine(seed, v.pos);
+            hash_combine(seed, v.color);
+            hash_combine(seed, v.texCoord);
+            return seed;
         }
+    };
+
+    bool Vertex::operator==(const Vertex& other) const {
+        return ((pos == other.pos) && (color == other.color) && (texCoord == other.texCoord));
     }
 
     vk::VertexInputBindingDescription Vertex::getBindingDescription() {
@@ -153,18 +147,15 @@ namespace volchara {
         return result;
     }
 
-    Object::Object(Renderer& renderer, std::vector<Vertex> initVertices, glm::vec3 translation, glm::vec3 scaling, glm::quat rotation) {
+    Object::Object(Renderer& renderer, std::vector<Vertex> initVertices, std::vector<uint32_t> initIndices, glm::vec3 translation, glm::vec3 scaling, glm::quat rotation) {
         this->renderer = &renderer;
-        std::map<Vertex, int32_t> indexMap;
-        for (Vertex v : initVertices) {
-            auto pos = indexMap.find(v);
-            if (pos == indexMap.end()) {
-                indices.push_back(vertices.size());
-                indexMap.insert({v, vertices.size()});
-                vertices.push_back(v);
-            } else {
-                indices.push_back(pos->second);
-            }
+        vertices = initVertices;
+        if (initIndices.empty()) {
+            indices = std::vector<uint32_t>(vertices.size());
+            std::iota(indices.begin(), indices.end(), 0);
+        }
+        else {
+            indices = initIndices;
         }
         transform.translation = translation;
         transform.scaling = scaling;
@@ -187,6 +178,24 @@ namespace volchara {
         textureIndex = renderer->createTextureImage(path);
         renderer->loadTextureToDescriptors(textureIndex);
     }
+    void Object::generateIndices(std::vector<Vertex> fromVertices) {
+        std::vector<Vertex> newVertices;
+        std::vector<uint32_t> newIndices;
+        std::unordered_map<Vertex, int32_t, VertexHash> indexMap;
+        for (Vertex v : fromVertices) {
+            auto pos = indexMap.find(v);
+            if (pos == indexMap.end()) {
+                newIndices.push_back(newVertices.size());
+                indexMap.insert({v, newVertices.size()});
+                newVertices.push_back(v);
+            } else {
+                newIndices.push_back(pos->second);
+            }
+        }
+        maxVertexIndex = *std::max_element(newIndices.begin(), newIndices.end());
+        vertices = newVertices;
+        indices = newIndices;
+    }
 
     Plane Plane::fromWorldCoordinates(Renderer& renderer, InitVerticesPlane initVertices) {
         std::vector<Vertex> vertices;
@@ -201,11 +210,133 @@ namespace volchara {
         float width = glm::length(x);
         float height = glm::length(y);
         vertices.push_back({.pos = {-width / 2.0f, height / 2.0f, 0}, .texCoord = {1, 0}});
-        vertices.push_back({.pos = {width / 2.0f, -height / 2.0f, 0}, .texCoord = {0, 1}});
         vertices.push_back({.pos = {width / 2.0f, height / 2.0f, 0}, .texCoord = {0, 0}});
-        vertices.push_back({.pos = {-width / 2.0f, height / 2.0f, 0}, .texCoord = {1, 0}});
-        vertices.push_back({.pos = {-width / 2.0f, -height / 2.0f, 0}, .texCoord = {1, 1}});
         vertices.push_back({.pos = {width / 2.0f, -height / 2.0f, 0}, .texCoord = {0, 1}});
-        return Plane(renderer, vertices, center, {1, 1, 1}, glm::quatLookAtRH(glm::normalize(z), y));
+        vertices.push_back({.pos = {-width / 2.0f, height / 2.0f, 0}, .texCoord = {1, 0}});
+        vertices.push_back({.pos = {width / 2.0f, -height / 2.0f, 0}, .texCoord = {0, 1}});
+        vertices.push_back({.pos = {-width / 2.0f, -height / 2.0f, 0}, .texCoord = {1, 1}});
+        Plane obj(renderer, {}, {}, center, {1, 1, 1}, glm::quatLookAtRH(glm::normalize(z), y));
+        obj.generateIndices(vertices);
+        return obj;
+    }
+    
+    GLTFModel GLTFModel::fromFile(Renderer &renderer, std::filesystem::path modelPath) {
+        tinygltf::TinyGLTF gltfLoader;
+        tinygltf::Model model;
+        std::string err;
+        std::string warn;
+        std::u8string unicodePathTmp = modelPath.u8string();
+        std::string unicodePath(unicodePathTmp.begin(), unicodePathTmp.end());
+        bool res;
+        if (modelPath.extension().string() == ".gltf") {
+            res = gltfLoader.LoadASCIIFromFile(&model, &err, &warn, unicodePath);
+        }
+        else if (modelPath.extension().string() == ".glb") {
+            res = gltfLoader.LoadBinaryFromFile(&model, &err, &warn, unicodePath);
+        }
+        else {
+            throw std::runtime_error(std::string("failed to load gltf: unknown extension ") + modelPath.extension().string());
+        }
+        if (!res || !err.empty()) {
+            throw std::runtime_error("failed to load gltf: " + err);
+        }
+        bool solid_color;
+        if (model.textures.size() < 1) {
+            solid_color = true;
+        }
+        else {
+            solid_color = false;
+        }
+        std::map<int, int> textureMapping;
+        for (tinygltf::Texture& texture : model.textures) {
+            int modelTextureId = texture.source;
+            std::filesystem::path texturePath = modelPath.parent_path() / model.images[modelTextureId].uri;
+            int rendererTextureId = renderer.createTextureImage(texturePath);
+            renderer.loadTextureToDescriptors(rendererTextureId);
+            textureMapping[modelTextureId] = rendererTextureId;
+        }
+        std::vector<Vertex> resVertices;
+        std::vector<uint32_t> resIndices;
+        tinygltf::Scene& defScene = model.scenes[model.defaultScene];
+        std::vector<int> nodes(defScene.nodes.begin(), defScene.nodes.end());
+        while (!nodes.empty()) {
+            int node_id = nodes.back();
+            nodes.pop_back();
+            tinygltf::Node& node = model.nodes[node_id];
+            for (int child : node.children) {
+                nodes.push_back(child);
+            }
+            if (node.mesh < 0) {
+                continue;
+            }
+
+            tinygltf::Mesh& mesh = model.meshes[node.mesh];
+            for (const tinygltf::Primitive prim : mesh.primitives) {
+                if (prim.mode != TINYGLTF_MODE_TRIANGLES && prim.mode != 0) {
+                    throw std::runtime_error("failed to load gltf: currently only triangle load available");
+                }
+
+                auto iterPosition = prim.attributes.find("POSITION");
+                if (iterPosition == prim.attributes.end()) {
+                    continue;
+                }
+                tinygltf::Accessor accessorPosition = model.accessors[iterPosition->second];
+                if (accessorPosition.type != TINYGLTF_TYPE_VEC3 || accessorPosition.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT) {
+                    throw std::runtime_error("failed to load gltf: position not vec3 float");
+                }
+                auto iterTexCoord = prim.attributes.find("TEXCOORD_0");
+                if (iterTexCoord == prim.attributes.end()) {
+                    continue;
+                }
+                tinygltf::Accessor accessorTexCoord = model.accessors[iterTexCoord->second];
+                if (accessorTexCoord.type != TINYGLTF_TYPE_VEC2 || accessorTexCoord.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT) {
+                    throw std::runtime_error("failed to load gltf: uv not vec2 float");
+                }
+                
+                tinygltf::BufferView& bufferViewPosition = model.bufferViews[accessorPosition.bufferView];
+                tinygltf::Buffer& bufferPosition = model.buffers[bufferViewPosition.buffer];
+                const float* positions = reinterpret_cast<const float*>(&bufferPosition.data[bufferViewPosition.byteOffset + accessorPosition.byteOffset]);
+
+                tinygltf::BufferView& bufferViewTexCoord = model.bufferViews[accessorTexCoord.bufferView];
+                tinygltf::Buffer& bufferTexCoord = model.buffers[bufferViewTexCoord.buffer];
+                const float* texcoords = reinterpret_cast<const float*>(&bufferTexCoord.data[bufferViewTexCoord.byteOffset + accessorTexCoord.byteOffset]);
+
+                if (prim.indices >= 0) {
+                    int indexOffset = resVertices.size();
+                    tinygltf::Accessor accessorIndices = model.accessors[prim.indices];
+                    tinygltf::BufferView& bufferViewIndices = model.bufferViews[accessorIndices.bufferView];
+                    tinygltf::Buffer& bufferIndices = model.buffers[bufferViewIndices.buffer];
+                    const uint32_t* indices = reinterpret_cast<const uint32_t*>(&bufferIndices.data[bufferViewIndices.byteOffset + accessorIndices.byteOffset]);
+                    for (size_t i = 0; i < accessorIndices.count; i++) {
+                        uint32_t index = indices[i];
+                        resIndices.push_back(index + indexOffset);
+                    }
+                    for (size_t vertexId = 0; vertexId < accessorPosition.count; vertexId++) {
+                        Vertex v;
+                        v.pos = glm::vec3(positions[vertexId*3 + 0], positions[vertexId*3 + 1], positions[vertexId*3 + 2]);
+                        v.texCoord = glm::vec2(texcoords[vertexId*2 + 0], texcoords[vertexId*2 + 1]);
+                        if (solid_color) {
+                            v.color = glm::vec3(255, 0, 0);
+                        }
+                        resVertices.push_back(v);
+                    }
+                }
+                else {
+                    for (size_t i = 0; i < accessorPosition.count; i++) {
+                        Vertex v;
+                        v.pos = glm::vec3(positions[i*3 + 0], positions[i*3 + 1], positions[i*3 + 2]);
+                        v.texCoord = glm::vec2(texcoords[i*2 + 0], texcoords[i*2 + 1]);
+                        if (solid_color) {
+                            v.color = glm::vec3(255, 0, 0);
+                        }
+                        resIndices.push_back(resVertices.size());
+                        resVertices.push_back(v);
+                    }
+                }
+            }
+        }
+        GLTFModel obj(renderer, resVertices, resIndices);
+        obj.textureIndex = textureMapping[0];
+        return obj;
     }
 }

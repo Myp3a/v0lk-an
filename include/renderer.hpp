@@ -6,7 +6,6 @@
 #include <iostream>
 #include <optional>
 #include <set>
-#include <string>
 #include <vector>
 
 #include <vulkan/vulkan.h>
@@ -45,6 +44,7 @@ namespace volchara {
 
     class Renderer {
         friend class volchara::Object;
+        friend class volchara::GLTFModel;
 
         uint32_t maxTextures = 64;
 
@@ -56,6 +56,25 @@ namespace volchara {
             void addObject(volchara::Object* obj);
             void delObject(volchara::Object* obj);
             Plane objPlaneFromWorldCoordinates(InitVerticesPlane vertices);
+            GLTFModel objGLTFModelFromFile(std::filesystem::path modelPath);
+
+            static std::vector<char *> readFile(const std::filesystem::path filename, bool asText = false) {
+                std::ifstream file(filename, std::ios::ate | (asText ? 0 : std::ios::binary));
+        
+                if (!file.is_open()) {
+                    throw std::runtime_error("failed to open file!");
+                }
+        
+                size_t fileSize = (size_t) file.tellg();
+                std::vector<char *> buffer(fileSize);
+        
+                file.seekg(0);
+                file.read(reinterpret_cast<char *>(buffer.data()), fileSize);
+        
+                file.close();
+        
+                return buffer;
+            }
         
         private:
             const std::vector<const char*> validationLayers = {
@@ -237,24 +256,6 @@ namespace volchara {
             void recordCommandBuffer(uint32_t imageIndex, uint32_t bufferIndex);
             void updateUniformBuffer(uint32_t imageIndex);
             void drawFrame();
-
-            static std::vector<char *> readFile(const std::filesystem::path filename) {
-                std::ifstream file(filename, std::ios::ate | std::ios::binary);
-        
-                if (!file.is_open()) {
-                    throw std::runtime_error("failed to open file!");
-                }
-        
-                size_t fileSize = (size_t) file.tellg();
-                std::vector<char *> buffer(fileSize);
-        
-                file.seekg(0);
-                file.read(reinterpret_cast<char *>(buffer.data()), fileSize);
-        
-                file.close();
-        
-                return buffer;
-            }
         
             static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(vk::DebugUtilsMessageSeverityFlagBitsEXT messageSeverity, vk::DebugUtilsMessageTypeFlagsEXT messageType, const vk::DebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) {
                 std::cerr << "validation layer: " << pCallbackData->pMessage << std::endl;

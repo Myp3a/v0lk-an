@@ -67,14 +67,20 @@ namespace volchara {
         return Plane::fromWorldCoordinates(*this, vertices);
     }
 
+    GLTFModel Renderer::objGLTFModelFromFile(std::filesystem::path modelPath) {
+        return GLTFModel::fromFile(*this, modelPath);
+    }
+
     void Renderer::putObjectsToBuffer() {
         std::vector<volchara::Vertex> vertices;
         std::vector<uint32_t> indices;
-        uint32_t offset = 0;
+        uint32_t indexOffset = 0;
         for (volchara::Object* obj : objects) {
-            vertices.insert(vertices.end(), obj->vertices.begin(), obj->vertices.end());
-            std::transform(obj->indices.begin(), obj->indices.end(), std::back_inserter(indices), [offset](uint32_t index){return index + offset;});
-            offset += obj->vertices.size();
+            if (!obj->vertices.empty()) {
+                vertices.insert(vertices.end(), obj->vertices.begin(), obj->vertices.end());
+                std::transform(obj->indices.begin(), obj->indices.end(), std::back_inserter(indices), [indexOffset](uint32_t index){return index + indexOffset;});
+                indexOffset += obj->maxVertexIndex + 1;
+            }
         }
         stagingBuffer.copyFrom(vertices.data(), (size_t)(vertices.size() * sizeof(volchara::Vertex)));
         vertexBuffer.copyFrom(stagingBuffer.allocInfo().pMappedData, 8388608);
@@ -651,7 +657,7 @@ namespace volchara {
         vk::PipelineRasterizationStateCreateInfo rasterizer{
             .polygonMode = vk::PolygonMode::eFill,
             .cullMode = vk::CullModeFlagBits::eBack,
-            .frontFace = vk::FrontFace::eClockwise,
+            .frontFace = vk::FrontFace::eCounterClockwise,
             .lineWidth = 1,
         };
 

@@ -25,6 +25,10 @@ add_library(stb_image STATIC extlibs/stb_image/stb_image.cpp)
 target_include_directories(stb_image PUBLIC extlibs/stb_image)
 target_link_libraries(volchara PUBLIC stb_image)
 
+add_library(tinygltf STATIC extlibs/tinygltf/tiny_gltf.cpp)
+target_include_directories(tinygltf PUBLIC extlibs/tinygltf PUBLIC extlibs/stb_image)
+target_link_libraries(volchara PUBLIC tinygltf)
+
 define_shader_set(
     NAME base_shaders
     GLOB "../shaders/*.frag" "../shaders/*.vert"
