@@ -14,10 +14,22 @@
 namespace volchara {
     class Renderer;
 
-    struct InitVerticesPlane {
+    struct InitDataPlane {
         std::array<float, 3> topLeft;
         std::array<float, 3> topRight;
         std::array<float, 3> botRight;
+    };
+
+    struct InitDataBox {
+        std::array<float, 3> center;
+        std::array<float, 3> sizes;
+        InitDataPlane frontOrientationPlane;
+    };
+
+    struct InitDataLight {
+        std::array<float, 3> position;
+        std::array<float, 3> color;
+        float brightness;
     };
 
     struct UniformBufferObject {
@@ -25,13 +37,29 @@ namespace volchara {
         glm::mat4 proj;
     };
 
-    struct PushConstants {
+    struct AmbientLightUniformBufferObject {
+        glm::vec3 color;
+        float brightness;
+    };
+
+    struct DirectionalLightUniformBufferObject : AmbientLightUniformBufferObject {
         glm::mat4 model;
-        uint32_t textureIndex;
+    };
+
+    struct VertexPushConstants {
+        glm::mat4 model;
+    };
+
+    struct FragmentPushConstants {
+        uint32_t textureIndex = 0;
+        glm::mat4 lightModel;
+        glm::vec3 color{0.0f, 0.0f, 0.0f};
+        float brightness = 0.0f;
     };
 
     struct Vertex {
         glm::vec3 pos;
+        glm::vec3 normal;
         glm::vec3 color{0, 0, 0};
         glm::vec2 texCoord;
 
@@ -114,7 +142,7 @@ namespace volchara {
 
     class Plane : public Object {
         public:
-            static Plane fromWorldCoordinates(Renderer& renderer, InitVerticesPlane initVertices);
+            static Plane fromWorldCoordinates(Renderer& renderer, InitDataPlane initVertices, bool wIndices = true);
             Plane(Renderer& renderer, std::vector<Vertex> vertices, std::vector<uint32_t> indices = {}, glm::vec3 translation = {0, 0, 0}, glm::vec3 scaling = {1, 1, 1}, glm::quat rotation = {1,0,0,0}) : Object(renderer, vertices, indices, translation, scaling, rotation) {};
     };
 
@@ -122,5 +150,28 @@ namespace volchara {
         public:
             static GLTFModel fromFile(Renderer& renderer, std::filesystem::path modelPath);
             GLTFModel(Renderer& renderer, std::vector<Vertex> vertices, std::vector<uint32_t> indices = {}, glm::vec3 translation = {0, 0, 0}, glm::vec3 scaling = {1, 1, 1}, glm::quat rotation = {1,0,0,0}) : Object(renderer, vertices, indices, translation, scaling, rotation) {};
+    };
+
+    class Box : public Object {
+        private:
+            static std::array<glm::vec3, 3> calcOrientation(InitDataPlane frontOrientationPlane);
+        public:
+            static Box fromWorldCoordinates(Renderer& renderer, InitDataBox initVertices, bool wIndices = true);
+            Box(Renderer& renderer, std::vector<Vertex> vertices, std::vector<uint32_t> indices = {}, glm::vec3 translation = {0, 0, 0}, glm::vec3 scaling = {1, 1, 1}, glm::quat rotation = {1,0,0,0}) : Object(renderer, vertices, indices, translation, scaling, rotation) {};
+    };
+
+    class AmbientLight : public Object {
+        public:
+            float brightness;
+            glm::vec3 color{0.0f, 0.0f, 0.0f};
+            static AmbientLight fromData(Renderer& renderer, InitDataLight initData);
+            AmbientLight(Renderer& renderer) : Object(renderer, {}) {};
+    };
+
+    class DirectionalLight : public AmbientLight {
+        public:
+            glm::vec3 position;
+            static DirectionalLight fromWorldCoordinates(Renderer& renderer, InitDataLight initData);
+            DirectionalLight(Renderer& renderer) : AmbientLight(renderer) {};
     };
 }

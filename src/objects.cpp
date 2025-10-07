@@ -27,6 +27,7 @@ namespace volchara {
         std::size_t operator()(Vertex const& v) const {
             std::size_t seed = 0;
             hash_combine(seed, v.pos);
+            hash_combine(seed, v.normal);
             hash_combine(seed, v.color);
             hash_combine(seed, v.texCoord);
             return seed;
@@ -58,8 +59,16 @@ namespace volchara {
         };
         attributeDescriptions.push_back(positionDescription);
 
-        vk::VertexInputAttributeDescription colorDescription{
+        vk::VertexInputAttributeDescription normalDescription{
             .location = 1,
+            .binding = 0,
+            .format = vk::Format::eR32G32B32Sfloat,
+            .offset = offsetof(Vertex, normal),
+        };
+        attributeDescriptions.push_back(normalDescription);
+
+        vk::VertexInputAttributeDescription colorDescription{
+            .location = 2,
             .binding = 0,
             .format = vk::Format::eR32G32B32Sfloat,
             .offset = offsetof(Vertex, color),
@@ -67,7 +76,7 @@ namespace volchara {
         attributeDescriptions.push_back(colorDescription);
 
         vk::VertexInputAttributeDescription textureCoordinatesDescription{
-            .location = 2,
+            .location = 3,
             .binding = 0,
             .format = vk::Format::eR32G32Sfloat,
             .offset = offsetof(Vertex, texCoord),
@@ -197,7 +206,7 @@ namespace volchara {
         indices = newIndices;
     }
 
-    Plane Plane::fromWorldCoordinates(Renderer& renderer, InitVerticesPlane initVertices) {
+    Plane Plane::fromWorldCoordinates(Renderer& renderer, InitDataPlane initVertices, bool wIndices) {
         std::vector<Vertex> vertices;
         glm::vec3 topLeft = {initVertices.topLeft[0], initVertices.topLeft[1], initVertices.topLeft[2]};
         glm::vec3 topRight = {initVertices.topRight[0], initVertices.topRight[1], initVertices.topRight[2]};
@@ -205,18 +214,21 @@ namespace volchara {
         glm::vec3 botLeft = topLeft - (topRight - botRight);
         glm::vec3 x = topRight - topLeft;
         glm::vec3 y = topLeft - botLeft;
-        glm::vec3 z = glm::cross(x, y);
+        glm::vec3 z = glm::normalize(glm::cross(x, y));
         glm::vec3 center = botLeft + x / 2.0f + y / 2.0f;
         float width = glm::length(x);
         float height = glm::length(y);
-        vertices.push_back({.pos = {-width / 2.0f, height / 2.0f, 0}, .texCoord = {1, 0}});
-        vertices.push_back({.pos = {width / 2.0f, height / 2.0f, 0}, .texCoord = {0, 0}});
-        vertices.push_back({.pos = {width / 2.0f, -height / 2.0f, 0}, .texCoord = {0, 1}});
-        vertices.push_back({.pos = {-width / 2.0f, height / 2.0f, 0}, .texCoord = {1, 0}});
-        vertices.push_back({.pos = {width / 2.0f, -height / 2.0f, 0}, .texCoord = {0, 1}});
-        vertices.push_back({.pos = {-width / 2.0f, -height / 2.0f, 0}, .texCoord = {1, 1}});
-        Plane obj(renderer, {}, {}, center, {1, 1, 1}, glm::quatLookAtRH(glm::normalize(z), y));
-        obj.generateIndices(vertices);
+        // Plane has its texture on its front, so UVs are hacky to make it work
+        vertices.push_back({.pos = {-width / 2.0f, height / 2.0f, 0}, .normal = z, .texCoord = {1, 0}});
+        vertices.push_back({.pos = {width / 2.0f, height / 2.0f, 0}, .normal = z, .texCoord = {0, 0}});
+        vertices.push_back({.pos = {width / 2.0f, -height / 2.0f, 0}, .normal = z, .texCoord = {0, 1}});
+        vertices.push_back({.pos = {-width / 2.0f, height / 2.0f, 0}, .normal = z, .texCoord = {1, 0}});
+        vertices.push_back({.pos = {width / 2.0f, -height / 2.0f, 0}, .normal = z, .texCoord = {0, 1}});
+        vertices.push_back({.pos = {-width / 2.0f, -height / 2.0f, 0}, .normal = z, .texCoord = {1, 1}});
+        Plane obj(renderer, {}, {}, center, {1, 1, 1}, glm::quatLookAtRH(z, y));
+        if (wIndices) {
+            obj.generateIndices(vertices);
+        }
         return obj;
     }
     
@@ -316,7 +328,7 @@ namespace volchara {
                         v.pos = glm::vec3(positions[vertexId*3 + 0], positions[vertexId*3 + 1], positions[vertexId*3 + 2]);
                         v.texCoord = glm::vec2(texcoords[vertexId*2 + 0], texcoords[vertexId*2 + 1]);
                         if (solid_color) {
-                            v.color = glm::vec3(255, 0, 0);
+                            v.color = glm::vec3(1, 0, 0);
                         }
                         resVertices.push_back(v);
                     }
@@ -327,7 +339,7 @@ namespace volchara {
                         v.pos = glm::vec3(positions[i*3 + 0], positions[i*3 + 1], positions[i*3 + 2]);
                         v.texCoord = glm::vec2(texcoords[i*2 + 0], texcoords[i*2 + 1]);
                         if (solid_color) {
-                            v.color = glm::vec3(255, 0, 0);
+                            v.color = glm::vec3(1, 0, 0);
                         }
                         resIndices.push_back(resVertices.size());
                         resVertices.push_back(v);
@@ -338,5 +350,89 @@ namespace volchara {
         GLTFModel obj(renderer, resVertices, resIndices);
         obj.textureIndex = textureMapping[0];
         return obj;
+    }
+
+    std::array<glm::vec3, 3> Box::calcOrientation(InitDataPlane frontOrientationPlane) {
+        glm::vec3 topLeft = {frontOrientationPlane.topLeft[0], frontOrientationPlane.topLeft[1], frontOrientationPlane.topLeft[2]};
+        glm::vec3 topRight = {frontOrientationPlane.topRight[0], frontOrientationPlane.topRight[1], frontOrientationPlane.topRight[2]};
+        glm::vec3 botRight = {frontOrientationPlane.botRight[0], frontOrientationPlane.botRight[1], frontOrientationPlane.botRight[2]};
+        glm::vec3 botLeft = topLeft - (topRight - botRight);
+        glm::vec3 x = glm::normalize(topRight - topLeft);
+        glm::vec3 y = glm::normalize(topLeft - botLeft);
+        glm::vec3 z = glm::normalize(glm::cross(x, y));
+        return {x, y, z};
+    }
+
+    Box Box::fromWorldCoordinates(Renderer& renderer, InitDataBox initData, bool wIndices) {
+        std::vector<Vertex> vertices;
+        glm::vec3 center({initData.center[0], initData.center[1], initData.center[2]});
+        auto[width, height, depth] = initData.sizes;
+        auto[x, y, z] = calcOrientation(initData.frontOrientationPlane);
+        // front
+        vertices.push_back({.pos = {-width / 2.0f, height / 2.0f, depth / 2.0f}, .normal = z, .texCoord = {0, 0}});
+        vertices.push_back({.pos = {-width / 2.0f, -height / 2.0f, depth / 2.0f}, .normal = z, .texCoord = {0, 1}});
+        vertices.push_back({.pos = {width / 2.0f, -height / 2.0f, depth / 2.0f}, .normal = z, .texCoord = {1, 1}});
+        vertices.push_back({.pos = {-width / 2.0f, height / 2.0f, depth / 2.0f}, .normal = z, .texCoord = {0, 0}});
+        vertices.push_back({.pos = {width / 2.0f, -height / 2.0f, depth / 2.0f}, .normal = z, .texCoord = {1, 1}});
+        vertices.push_back({.pos = {width / 2.0f, height / 2.0f, depth / 2.0f}, .normal = z, .texCoord = {1, 0}});
+        // right
+        vertices.push_back({.pos = {width / 2.0f, height / 2.0f, depth / 2.0f}, .normal = x, .texCoord = {0, 0}});
+        vertices.push_back({.pos = {width / 2.0f, -height / 2.0f, depth / 2.0f}, .normal = x, .texCoord = {0, 1}});
+        vertices.push_back({.pos = {width / 2.0f, -height / 2.0f, -depth / 2.0f}, .normal = x, .texCoord = {1, 1}});
+        vertices.push_back({.pos = {width / 2.0f, height / 2.0f, depth / 2.0f}, .normal = x, .texCoord = {0, 0}});
+        vertices.push_back({.pos = {width / 2.0f, -height / 2.0f, -depth / 2.0f}, .normal = x, .texCoord = {1, 1}});
+        vertices.push_back({.pos = {width / 2.0f, height / 2.0f, -depth / 2.0f}, .normal = x, .texCoord = {1, 0}});
+        // back
+        vertices.push_back({.pos = {width / 2.0f, height / 2.0f, -depth / 2.0f}, .normal = -z, .texCoord = {0, 0}});
+        vertices.push_back({.pos = {width / 2.0f, -height / 2.0f, -depth / 2.0f}, .normal = -z, .texCoord = {0, 1}});
+        vertices.push_back({.pos = {-width / 2.0f, -height / 2.0f, -depth / 2.0f}, .normal = -z, .texCoord = {1, 1}});
+        vertices.push_back({.pos = {width / 2.0f, height / 2.0f, -depth / 2.0f}, .normal = -z, .texCoord = {0, 0}});
+        vertices.push_back({.pos = {-width / 2.0f, -height / 2.0f, -depth / 2.0f}, .normal = -z, .texCoord = {1, 1}});
+        vertices.push_back({.pos = {-width / 2.0f, height / 2.0f, -depth / 2.0f}, .normal = -z, .texCoord = {1, 0}});
+        // left
+        vertices.push_back({.pos = {-width / 2.0f, height / 2.0f, -depth / 2.0f}, .normal = -x, .texCoord = {0, 0}});
+        vertices.push_back({.pos = {-width / 2.0f, -height / 2.0f, -depth / 2.0f}, .normal = -x, .texCoord = {0, 1}});
+        vertices.push_back({.pos = {-width / 2.0f, -height / 2.0f, depth / 2.0f}, .normal = -x, .texCoord = {1, 1}});
+        vertices.push_back({.pos = {-width / 2.0f, height / 2.0f, -depth / 2.0f}, .normal = -x, .texCoord = {0, 0}});
+        vertices.push_back({.pos = {-width / 2.0f, -height / 2.0f, depth / 2.0f}, .normal = -x, .texCoord = {1, 1}});
+        vertices.push_back({.pos = {-width / 2.0f, height / 2.0f, depth / 2.0f}, .normal = -x, .texCoord = {1, 0}});
+        // top
+        vertices.push_back({.pos = {width / 2.0f, height / 2.0f, depth / 2.0f}, .normal = y, .texCoord = {0, 0}});
+        vertices.push_back({.pos = {width / 2.0f, height / 2.0f, -depth / 2.0f}, .normal = y, .texCoord = {0, 1}});
+        vertices.push_back({.pos = {-width / 2.0f, height / 2.0f, -depth / 2.0f}, .normal = y, .texCoord = {1, 1}});
+        vertices.push_back({.pos = {width / 2.0f, height / 2.0f, depth / 2.0f}, .normal = y, .texCoord = {0, 0}});
+        vertices.push_back({.pos = {-width / 2.0f, height / 2.0f, -depth / 2.0f}, .normal = y, .texCoord = {1, 1}});
+        vertices.push_back({.pos = {-width / 2.0f, height / 2.0f, depth / 2.0f}, .normal = y, .texCoord = {1, 0}});
+        // bot
+        vertices.push_back({.pos = {width / 2.0f, -height / 2.0f, -depth / 2.0f}, .normal = -y, .texCoord = {0, 0}});
+        vertices.push_back({.pos = {width / 2.0f, -height / 2.0f, depth / 2.0f}, .normal = -y, .texCoord = {0, 1}});
+        vertices.push_back({.pos = {-width / 2.0f, -height / 2.0f, depth / 2.0f}, .normal = -y, .texCoord = {1, 1}});
+        vertices.push_back({.pos = {width / 2.0f, -height / 2.0f, -depth / 2.0f}, .normal = -y, .texCoord = {0, 0}});
+        vertices.push_back({.pos = {-width / 2.0f, -height / 2.0f, depth / 2.0f}, .normal = -y, .texCoord = {1, 1}});
+        vertices.push_back({.pos = {-width / 2.0f, -height / 2.0f, -depth / 2.0f}, .normal = -y, .texCoord = {1, 0}});
+
+        Box obj(renderer, {}, {}, center, {1, 1, 1}, glm::quatLookAtRH(z, y));
+        if (wIndices){
+            obj.generateIndices(vertices);
+        }
+        return obj;
+    }
+
+    AmbientLight AmbientLight::fromData(Renderer& renderer, InitDataLight initData) {
+        glm::vec3 color({initData.color[0], initData.color[1], initData.color[2]});
+        AmbientLight light(renderer);
+        light.brightness = initData.brightness;
+        light.color = color;
+        return light;
+    }
+
+    DirectionalLight DirectionalLight::fromWorldCoordinates(Renderer& renderer, InitDataLight initData) {
+        glm::vec3 position({initData.position[0], initData.position[1], initData.position[2]});
+        glm::vec3 color({initData.color[0], initData.color[1], initData.color[2]});
+        DirectionalLight light(renderer);
+        light.brightness = initData.brightness;
+        light.color = color;
+        light.transform.translation = position;
+        return light;
     }
 }

@@ -39,7 +39,7 @@ namespace volchara {
         return p;
     }
 
-    Renderer::Renderer() : camera(*this) {
+    Renderer::Renderer() : camera(*this), ambientLight(*this) {
         init();
     }
 
@@ -63,12 +63,34 @@ namespace volchara {
         putObjectsToBuffer();
     }
 
-    Plane Renderer::objPlaneFromWorldCoordinates(InitVerticesPlane vertices) {
+    void Renderer::addLight(volchara::DirectionalLight* l) {
+        lights.push_back(l);
+        putLightToBuffer();
+    }
+
+    Plane Renderer::objPlaneFromWorldCoordinates(InitDataPlane vertices) {
         return Plane::fromWorldCoordinates(*this, vertices);
     }
 
     GLTFModel Renderer::objGLTFModelFromFile(std::filesystem::path modelPath) {
         return GLTFModel::fromFile(*this, modelPath);
+    }
+
+    Box Renderer::objBoxFromWorldCoordinates(InitDataBox vertices) {
+        return Box::fromWorldCoordinates(*this, vertices);
+    }
+
+    void Renderer::setAmbientLight(InitDataLight data) {
+        ambientLight = AmbientLight::fromData(*this, data);
+        AmbientLightUniformBufferObject ubo{
+            .color = ambientLight.color,
+            .brightness = ambientLight.brightness
+        };
+        ambientLightBuffer.copyFrom(&ubo, sizeof(ubo));
+    }
+
+    DirectionalLight Renderer::objDirectionalLightFromWorldCoordinates(InitDataLight data) {
+        return DirectionalLight::fromWorldCoordinates(*this, data);
     }
 
     void Renderer::putObjectsToBuffer() {
@@ -86,6 +108,14 @@ namespace volchara {
         vertexBuffer.copyFrom(stagingBuffer.allocInfo().pMappedData, 8388608);
         stagingBuffer.copyFrom(indices.data(), (size_t)(indices.size() * sizeof(uint32_t)));
         indexBuffer.copyFrom(stagingBuffer.allocInfo().pMappedData, 8388608);
+    }
+
+    void Renderer::putLightToBuffer() {
+        DirectionalLightUniformBufferObject l;
+        l.model = lights[0]->transform.modelMatrix();
+        l.brightness  = lights[0]->brightness;
+        l.color = lights[0]->color;
+        directionalLightBuffer.copyFrom(&l, sizeof(l));
     }
 
     void Renderer::initWindow() {
@@ -125,7 +155,7 @@ namespace volchara {
         createSSBOBuffer();
         createDepthResources();
         createFramebuffers();
-        uint32_t lisa = createTextureImage(getResourceDir() / "textures/lisa.jpg");
+        uint32_t lisa = createTextureImage(getResourceDir() / "textures/uv.png");
         createDescriptorPool();
         createDescriptorSets();
         loadTextureToDescriptors(lisa);
@@ -604,6 +634,32 @@ namespace volchara {
             .pBindings = ssboBindings.data(),
         };
         descriptorSetLayoutSSBO = device.createDescriptorSetLayout(ssbolayoutInfo);
+
+        vk::DescriptorSetLayoutBinding ambientLightUboLayoutBinding{
+            .binding = 0,
+            .descriptorType = vk::DescriptorType::eUniformBuffer,
+            .descriptorCount = 1,
+            .stageFlags = vk::ShaderStageFlagBits::eFragment,
+        };
+        std::vector<vk::DescriptorSetLayoutBinding> ambientLightUboLayoutBindings{ambientLightUboLayoutBinding};
+        vk::DescriptorSetLayoutCreateInfo ambientLightUboLayoutInfo{
+            .bindingCount = static_cast<uint32_t>(ambientLightUboLayoutBindings.size()),
+            .pBindings = ambientLightUboLayoutBindings.data(),
+        };
+        descriptorSetLayoutAmbientLightUBO = device.createDescriptorSetLayout(ambientLightUboLayoutInfo);
+
+        vk::DescriptorSetLayoutBinding directionalLightUboLayoutBinding{
+            .binding = 0,
+            .descriptorType = vk::DescriptorType::eUniformBuffer,
+            .descriptorCount = 1,
+            .stageFlags = vk::ShaderStageFlagBits::eFragment,
+        };
+        std::vector<vk::DescriptorSetLayoutBinding> directionalLightUboLayoutBindings{directionalLightUboLayoutBinding};
+        vk::DescriptorSetLayoutCreateInfo directionalLightUboLayoutInfo{
+            .bindingCount = static_cast<uint32_t>(directionalLightUboLayoutBindings.size()),
+            .pBindings = directionalLightUboLayoutBindings.data(),
+        };
+        descriptorSetLayoutDirectionalLightUBO = device.createDescriptorSetLayout(directionalLightUboLayoutInfo);
     }
 
     vk::raii::ShaderModule Renderer::createShaderModule(const std::vector<char *>& code) {
@@ -689,17 +745,23 @@ namespace volchara {
             .depthCompareOp = vk::CompareOp::eGreater,
         };
 
-        vk::PushConstantRange pushConstantRange{
-            .stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
-            .size = sizeof(PushConstants),
+        vk::PushConstantRange vertexPushConstantRange{
+            .stageFlags = vk::ShaderStageFlagBits::eVertex,
+            .size = sizeof(VertexPushConstants),
         };
+        vk::PushConstantRange fragmentPushConstantRange{
+            .stageFlags = vk::ShaderStageFlagBits::eFragment,
+            .offset = sizeof(VertexPushConstants),
+            .size = sizeof(FragmentPushConstants),
+        };
+        std::vector<vk::PushConstantRange> pushConstantRanges = {vertexPushConstantRange, fragmentPushConstantRange};
 
-        std::vector<vk::DescriptorSetLayout> descriptorSets = {*descriptorSetLayoutUBO, *descriptorSetLayoutTextures, *descriptorSetLayoutSSBO};
+        std::vector<vk::DescriptorSetLayout> descriptorSets = {*descriptorSetLayoutUBO, *descriptorSetLayoutTextures, *descriptorSetLayoutSSBO, *descriptorSetLayoutAmbientLightUBO, *descriptorSetLayoutDirectionalLightUBO};
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo{
             .setLayoutCount = static_cast<uint32_t>(descriptorSets.size()),
             .pSetLayouts = descriptorSets.data(),
-            .pushConstantRangeCount = 1,
-            .pPushConstantRanges = &pushConstantRange,
+            .pushConstantRangeCount = static_cast<uint32_t>(pushConstantRanges.size()),
+            .pPushConstantRanges = pushConstantRanges.data(),
         };
 
         pipelineLayout = device.createPipelineLayout(pipelineLayoutInfo);
@@ -772,11 +834,9 @@ namespace volchara {
     }
 
     void Renderer::createUniformBuffers() {
-        vk::DeviceSize bufferSize = sizeof(UniformBufferObject);
-
         for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             vk::BufferCreateInfo bufferInfo{
-                .size = 8388608, // 8MB //indices.size() * sizeof(uint32_t),
+                .size = sizeof(UniformBufferObject),
                 .usage = vk::BufferUsageFlagBits::eUniformBuffer,
                 .sharingMode = vk::SharingMode::eExclusive,
             };
@@ -786,6 +846,28 @@ namespace volchara {
             };
             uniformBuffers.push_back(allocator.createBuffer(bufferInfo, allocInfo));
         }
+
+        vk::BufferCreateInfo ambientBufferInfo{
+            .size = sizeof(AmbientLightUniformBufferObject),
+            .usage = vk::BufferUsageFlagBits::eUniformBuffer,
+            .sharingMode = vk::SharingMode::eExclusive,
+        };
+        vma::AllocationCreateInfo ambientAllocInfo{
+            .flags = vma::AllocationCreateFlagBits::eHostAccessSequentialWrite | vma::AllocationCreateFlagBits::eMapped,
+            .usage = vma::MemoryUsage::eAuto,
+        };
+        ambientLightBuffer = allocator.createBuffer(ambientBufferInfo, ambientAllocInfo);
+
+        vk::BufferCreateInfo directionalBufferInfo{
+            .size = sizeof(DirectionalLightUniformBufferObject),
+            .usage = vk::BufferUsageFlagBits::eUniformBuffer,
+            .sharingMode = vk::SharingMode::eExclusive,
+        };
+        vma::AllocationCreateInfo directionalAllocInfo{
+            .flags = vma::AllocationCreateFlagBits::eHostAccessSequentialWrite | vma::AllocationCreateFlagBits::eMapped,
+            .usage = vma::MemoryUsage::eAuto,
+        };
+        directionalLightBuffer = allocator.createBuffer(directionalBufferInfo, directionalAllocInfo);
     }
 
     void Renderer::createSSBOBuffer() {
@@ -962,11 +1044,19 @@ namespace volchara {
             .type = vk::DescriptorType::eSampler,
             .descriptorCount = 1,
         };
-        std::array<vk::DescriptorPoolSize, 4> poolSizes = {uboSize, ssboSize, imageSize, samplerSize};
+        vk::DescriptorPoolSize ambLightUboSize{
+            .type = vk::DescriptorType::eUniformBuffer,
+            .descriptorCount = 1,
+        };
+        vk::DescriptorPoolSize dirLightUboSize{
+            .type = vk::DescriptorType::eUniformBuffer,
+            .descriptorCount = 1,
+        };
+        std::vector<vk::DescriptorPoolSize> poolSizes = {uboSize, ssboSize, imageSize, samplerSize, ambLightUboSize, dirLightUboSize};
         vk::DescriptorPoolCreateInfo poolInfo{
             .flags = vk::DescriptorPoolCreateFlagBits::eUpdateAfterBind | vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
             .maxSets = 1024,
-            .poolSizeCount = poolSizes.size(),
+            .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
             .pPoolSizes = poolSizes.data(),
         };
         descriptorPool = device.createDescriptorPool(poolInfo);
@@ -1051,6 +1141,44 @@ namespace volchara {
             .pBufferInfo = &ssbobufferInfo,
         };
         device.updateDescriptorSets(ssbodescriptorWrite, nullptr);
+
+        vk::DescriptorSetAllocateInfo ambientLightUboallocInfo{
+            .descriptorPool = descriptorPool,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &*descriptorSetLayoutAmbientLightUBO,
+        };
+        descriptorSetsAmbientLightUBO = device.allocateDescriptorSets(ambientLightUboallocInfo);
+        vk::DescriptorBufferInfo ambientLightUbobufferInfo{
+            .buffer = ambientLightBuffer,
+            .range = vk::WholeSize,
+        };
+        vk::WriteDescriptorSet ambientLightUbodescriptorWrite{
+            .dstSet = descriptorSetsAmbientLightUBO[0],
+            .dstBinding = 0,
+            .descriptorCount = 1,
+            .descriptorType = vk::DescriptorType::eUniformBuffer,
+            .pBufferInfo = &ambientLightUbobufferInfo,
+        };
+        device.updateDescriptorSets(ambientLightUbodescriptorWrite, nullptr);
+
+        vk::DescriptorSetAllocateInfo directionalLightUboallocInfo{
+            .descriptorPool = descriptorPool,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &*descriptorSetLayoutDirectionalLightUBO,
+        };
+        descriptorSetsDirectionalLightUBO = device.allocateDescriptorSets(directionalLightUboallocInfo);
+        vk::DescriptorBufferInfo directionalLightUbobufferInfo{
+            .buffer = directionalLightBuffer,
+            .range = vk::WholeSize,
+        };
+        vk::WriteDescriptorSet directionalLightUbodescriptorWrite{
+            .dstSet = descriptorSetsDirectionalLightUBO[0],
+            .dstBinding = 0,
+            .descriptorCount = 1,
+            .descriptorType = vk::DescriptorType::eUniformBuffer,
+            .pBufferInfo = &directionalLightUbobufferInfo,
+        };
+        device.updateDescriptorSets(directionalLightUbodescriptorWrite, nullptr);
     }
 
     uint32_t Renderer::loadTextureToDescriptors(uint32_t textureIndex) {
@@ -1177,12 +1305,16 @@ namespace volchara {
         commandBuffers[bufferIndex].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, *descriptorSetsUBO[bufferIndex], nullptr);
         commandBuffers[bufferIndex].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 1, *descriptorSetsTextures[0], nullptr);
         commandBuffers[bufferIndex].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 2, *descriptorSetsSSBO[0], nullptr);
+        commandBuffers[bufferIndex].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 3, *descriptorSetsAmbientLightUBO[0], nullptr);
+        commandBuffers[bufferIndex].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 4, *descriptorSetsDirectionalLightUBO[0], nullptr);
         uint32_t alreadyDrawn = 0;
         for (int i = 0; i < objects.size(); i++) {
-            PushConstants cnst;
-            cnst.model = objects[i]->transform.modelMatrix();
-            cnst.textureIndex = objects[i]->textureIndex;
-            commandBuffers[bufferIndex].pushConstants<PushConstants>(pipelineLayout, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0, {cnst});
+            VertexPushConstants vcnst;
+            vcnst.model = objects[i]->transform.modelMatrix();
+            FragmentPushConstants fcnst;
+            fcnst.textureIndex = objects[i]->textureIndex;
+            commandBuffers[bufferIndex].pushConstants<VertexPushConstants>(pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, {vcnst});
+            commandBuffers[bufferIndex].pushConstants<FragmentPushConstants>(pipelineLayout, vk::ShaderStageFlagBits::eFragment, sizeof(VertexPushConstants), {fcnst});
             commandBuffers[bufferIndex].drawIndexed(objects[i]->indices.size(), 1, alreadyDrawn, 0, 0);
             alreadyDrawn += objects[i]->indices.size();
         }
