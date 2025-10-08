@@ -1,9 +1,14 @@
 #include <chrono>
+#include <random>
 #include <thread>
 
 #include <renderer.hpp>
 
 volchara::Renderer renderer{};
+std::mt19937 rnd(std::chrono::time_point<std::chrono::system_clock>().time_since_epoch().count());
+std::uniform_real_distribution<> dis(0.0f, 1.0f);
+std::uniform_real_distribution<> bdis(0.05f, 0.25f);
+
 
 void mvmnt(volchara::Object* obj, float passedSeconds, std::set<int> pressedKeys) {
     if (pressedKeys.contains(GLFW_KEY_UP)) obj->transform.position.up(passedSeconds, true);
@@ -38,8 +43,19 @@ int main() {
     obj1.frameCallbacks.push_back(mvmnt);
     renderer.addObject(&obj1);
     renderer.setAmbientLight({{}, {1.0f, 1.0f, 1.0f}, 0.01f});
-    volchara::DirectionalLight svit = renderer.objDirectionalLightFromWorldCoordinates({{-0.6f, 1.0f, -0.1f}, {1.0f, 1.0f, 1.0f}, 0.9f});
-    renderer.addLight(&svit);
+    float r_offset = -0.05f;
+    float b_offset = -0.7f;
+    std::vector<volchara::DirectionalLight> lights{};
+    for (float r = 0; r < 1; r += 0.1) {
+        for (float g = 0; g < 2; g += 0.1) {
+            volchara::DirectionalLight svit = renderer.objDirectionalLightFromWorldCoordinates({{r_offset + r, b_offset + g, -0.13f}, {static_cast<float>(dis(rnd)), static_cast<float>(dis(rnd)), static_cast<float>(dis(rnd))}, static_cast<float>(bdis(rnd))});
+            lights.push_back(std::move(svit));
+        }
+    }
+    for (int i = 0; i < lights.size(); i++) {
+        renderer.addLight(&lights[i]);
+    }
+    
     renderer.run();
     return 0;
 }

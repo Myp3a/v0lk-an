@@ -46,14 +46,10 @@ namespace volchara {
         glm::mat4 model;
     };
 
-    struct VertexPushConstants {
+    struct PushConstants {
         glm::mat4 model;
-    };
-
-    struct FragmentPushConstants {
         uint32_t textureIndex = 0;
-        glm::mat4 lightModel;
-        glm::vec3 color{0.0f, 0.0f, 0.0f};
+        glm::vec4 color{0.0f, 0.0f, 0.0f, 0.0f};
         float brightness = 0.0f;
     };
 

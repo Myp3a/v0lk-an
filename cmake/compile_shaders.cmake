@@ -28,7 +28,8 @@ function(define_shader_set)
     add_custom_command(
       OUTPUT ${_compiled_shader}
       COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/resources/shaders/"
-      COMMAND ${GLSL_VALIDATOR} -V ${_raw_shader} -o ${_compiled_shader}
+      # -gVS - debug compilation (RenderDoc debug, for example)
+      COMMAND ${GLSL_VALIDATOR} -gVS -V ${_raw_shader} -o ${_compiled_shader}
       COMMENT "Compiling shader ${_shader_filename}: ${_raw_shader} -> ${_compiled_shader}"
       DEPENDS ${_raw_shader})
     list(APPEND _compiled_shaders ${_compiled_shader})

@@ -7,6 +7,9 @@ layout(binding = 0) uniform UniformBufferObject {
 
 layout(push_constant) uniform PushConstants {
     mat4 model;
+    uint textureId;
+    vec4 color;
+    float brightness;
 } pcs;
 
 layout(location = 0) in vec3 inPosition;

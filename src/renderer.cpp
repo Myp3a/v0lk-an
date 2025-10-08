@@ -65,7 +65,6 @@ namespace volchara {
 
     void Renderer::addLight(volchara::DirectionalLight* l) {
         lights.push_back(l);
-        putLightToBuffer();
     }
 
     Plane Renderer::objPlaneFromWorldCoordinates(InitDataPlane vertices) {
@@ -154,6 +153,8 @@ namespace volchara {
         createUniformBuffers();
         createSSBOBuffer();
         createDepthResources();
+        createNormalResources();
+        createIntermediateColorResources();
         createFramebuffers();
         uint32_t lisa = createTextureImage(getResourceDir() / "textures/uv.png");
         createDescriptorPool();
@@ -461,7 +462,7 @@ namespace volchara {
             .imageColorSpace = surfaceFormat.colorSpace,
             .imageExtent = extent,
             .imageArrayLayers = 1,
-            .imageUsage = vk::ImageUsageFlagBits::eColorAttachment,
+            .imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eInputAttachment,
             .imageSharingMode = (indices.graphicsFamily != indices.presentFamily) ? vk::SharingMode::eConcurrent : vk::SharingMode::eExclusive,
             .queueFamilyIndexCount = static_cast<uint32_t>(queueIndices.size()),
             .pQueueFamilyIndices = queueIndices.data(),
@@ -523,18 +524,26 @@ namespace volchara {
     }
 
     void Renderer::createRenderPass() {
-        vk::AttachmentDescription colorAttachment{
-            .format = swapChainImageFormat,
+        vk::AttachmentDescription intermediateColorAttachment{
+            .format = vk::Format::eR8G8B8A8Unorm,
+            .samples = vk::SampleCountFlagBits::e1,
             .loadOp = vk::AttachmentLoadOp::eClear,
             .storeOp = vk::AttachmentStoreOp::eStore,
             .stencilLoadOp = vk::AttachmentLoadOp::eDontCare,
             .stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
             .initialLayout = vk::ImageLayout::eUndefined,
-            .finalLayout = vk::ImageLayout::ePresentSrcKHR,
+            .finalLayout = vk::ImageLayout::eColorAttachmentOptimal,
         };
-        vk::AttachmentReference colorAttachmentRef{
-            .attachment = 0,
-            .layout = vk::ImageLayout::eColorAttachmentOptimal,
+
+        vk::AttachmentDescription normalAttachment{
+            .format = vk::Format::eR16G16B16A16Sfloat,
+            .samples = vk::SampleCountFlagBits::e1,
+            .loadOp = vk::AttachmentLoadOp::eClear,
+            .storeOp = vk::AttachmentStoreOp::eStore,
+            .stencilLoadOp = vk::AttachmentLoadOp::eDontCare,
+            .stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
+            .initialLayout = vk::ImageLayout::eUndefined,
+            .finalLayout = vk::ImageLayout::eColorAttachmentOptimal,
         };
 
         vk::AttachmentDescription depthAttachment{
@@ -546,19 +555,32 @@ namespace volchara {
             .initialLayout = vk::ImageLayout::eUndefined,
             .finalLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal,
         };
-        vk::AttachmentReference depthAttachmentRef{
-            .attachment = 1,
-            .layout = vk::ImageLayout::eDepthStencilAttachmentOptimal,
+
+        vk::AttachmentDescription finalColorAttachment{
+            .format = swapChainImageFormat,
+            .loadOp = vk::AttachmentLoadOp::eClear,
+            .storeOp = vk::AttachmentStoreOp::eStore,
+            .stencilLoadOp = vk::AttachmentLoadOp::eDontCare,
+            .stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
+            .initialLayout = vk::ImageLayout::eUndefined,
+            .finalLayout = vk::ImageLayout::ePresentSrcKHR,
         };
 
-        vk::SubpassDescription subpass{
+        std::vector<vk::AttachmentReference> colorAttachments = {
+            {.attachment = 0, .layout = vk::ImageLayout::eColorAttachmentOptimal},
+            {.attachment = 1, .layout = vk::ImageLayout::eColorAttachmentOptimal}
+        };
+        std::vector<vk::AttachmentReference> depthAttachments = {
+            {.attachment = 2, .layout = vk::ImageLayout::eDepthStencilAttachmentOptimal}
+        };
+        vk::SubpassDescription colorSubpass{
             .pipelineBindPoint = vk::PipelineBindPoint::eGraphics,
-            .colorAttachmentCount = 1,
-            .pColorAttachments = &colorAttachmentRef,
-            .pDepthStencilAttachment = &depthAttachmentRef,
+            .colorAttachmentCount = static_cast<uint32_t>(colorAttachments.size()),
+            .pColorAttachments = colorAttachments.data(),
+            .pDepthStencilAttachment = depthAttachments.data(),
         };
 
-        vk::SubpassDependency dependency{
+        vk::SubpassDependency startDependency{
             .srcSubpass = vk::SubpassExternal,
             .dstSubpass = 0,
             .srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eLateFragmentTests,
@@ -567,9 +589,34 @@ namespace volchara {
             .dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite,
         };
 
-        std::vector<vk::AttachmentDescription> attachmentDescriptions { colorAttachment, depthAttachment };
-        std::vector<vk::SubpassDescription> subpassVec { subpass };
-        std::vector<vk::SubpassDependency> dependencyVec { dependency };
+        std::vector<vk::AttachmentReference> lightInAttachments = {
+            {.attachment = 0, .layout = vk::ImageLayout::eShaderReadOnlyOptimal},
+            {.attachment = 1, .layout = vk::ImageLayout::eShaderReadOnlyOptimal},
+            {.attachment = 2, .layout = vk::ImageLayout::eDepthStencilReadOnlyOptimal},
+        };
+        std::vector<vk::AttachmentReference> lightOutAttachments = {
+            {.attachment = 3, .layout = vk::ImageLayout::eColorAttachmentOptimal}
+        };
+        vk::SubpassDescription lightSubpass{
+            .pipelineBindPoint = vk::PipelineBindPoint::eGraphics,
+            .inputAttachmentCount = static_cast<uint32_t>(lightInAttachments.size()),
+            .pInputAttachments = lightInAttachments.data(),
+            .colorAttachmentCount = static_cast<uint32_t>(lightOutAttachments.size()),
+            .pColorAttachments = lightOutAttachments.data(),
+        };
+
+        vk::SubpassDependency lightDependency{
+            .srcSubpass = 0,
+            .dstSubpass = 1,
+            .srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
+            .dstStageMask = vk::PipelineStageFlagBits::eFragmentShader,
+            .srcAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite | vk::AccessFlagBits::eColorAttachmentWrite,
+            .dstAccessMask = vk::AccessFlagBits::eInputAttachmentRead,
+        };
+
+        std::vector<vk::AttachmentDescription> attachmentDescriptions { intermediateColorAttachment, normalAttachment, depthAttachment, finalColorAttachment };
+        std::vector<vk::SubpassDescription> subpassVec { colorSubpass, lightSubpass };
+        std::vector<vk::SubpassDependency> dependencyVec { startDependency, lightDependency };
         vk::RenderPassCreateInfo renderPassInfo{
             .attachmentCount = static_cast<uint32_t>(attachmentDescriptions.size()),
             .pAttachments = attachmentDescriptions.data(),
@@ -587,7 +634,7 @@ namespace volchara {
             .binding = 0,
             .descriptorType = vk::DescriptorType::eUniformBuffer,
             .descriptorCount = 1,
-            .stageFlags = vk::ShaderStageFlagBits::eVertex,
+            .stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
         };
         std::vector<vk::DescriptorSetLayoutBinding> uboBindings{uboLayoutBinding};
         vk::DescriptorSetLayoutCreateInfo ubolayoutInfo{
@@ -660,6 +707,31 @@ namespace volchara {
             .pBindings = directionalLightUboLayoutBindings.data(),
         };
         descriptorSetLayoutDirectionalLightUBO = device.createDescriptorSetLayout(directionalLightUboLayoutInfo);
+
+        vk::DescriptorSetLayoutBinding lightSubpassColorLayoutBinding{
+            .binding = 0,
+            .descriptorType = vk::DescriptorType::eInputAttachment,
+            .descriptorCount = 1,
+            .stageFlags = vk::ShaderStageFlagBits::eFragment,
+        };
+        vk::DescriptorSetLayoutBinding lightSubpassNormalLayoutBinding{
+            .binding = 1,
+            .descriptorType = vk::DescriptorType::eInputAttachment,
+            .descriptorCount = 1,
+            .stageFlags = vk::ShaderStageFlagBits::eFragment,
+        };
+        vk::DescriptorSetLayoutBinding lightSubpassDepthLayoutBinding{
+            .binding = 2,
+            .descriptorType = vk::DescriptorType::eInputAttachment,
+            .descriptorCount = 1,
+            .stageFlags = vk::ShaderStageFlagBits::eFragment,
+        };
+        std::vector<vk::DescriptorSetLayoutBinding> lightSubpassLayoutBindings{lightSubpassColorLayoutBinding, lightSubpassNormalLayoutBinding, lightSubpassDepthLayoutBinding};
+        vk::DescriptorSetLayoutCreateInfo lightSubpassLayoutInfo{
+            .bindingCount = static_cast<uint32_t>(lightSubpassLayoutBindings.size()),
+            .pBindings = lightSubpassLayoutBindings.data(),
+        };
+        descriptorSetLayoutLightSubpass = device.createDescriptorSetLayout(lightSubpassLayoutInfo);
     }
 
     vk::raii::ShaderModule Renderer::createShaderModule(const std::vector<char *>& code) {
@@ -721,13 +793,14 @@ namespace volchara {
             .sampleShadingEnable = false,
         };
 
-        vk::PipelineColorBlendAttachmentState colorBlendAttachment{
-            .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
+        std::vector<vk::PipelineColorBlendAttachmentState> colorBlendAttachments{
+            {.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA},
+            {.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA},
         };
 
         vk::PipelineColorBlendStateCreateInfo colorBlending{
-            .attachmentCount = 1,
-            .pAttachments = &colorBlendAttachment,
+            .attachmentCount = static_cast<uint32_t>(colorBlendAttachments.size()),
+            .pAttachments = colorBlendAttachments.data(),
         };
 
         std::vector<vk::DynamicState> dynamicStates = {
@@ -745,16 +818,11 @@ namespace volchara {
             .depthCompareOp = vk::CompareOp::eGreater,
         };
 
-        vk::PushConstantRange vertexPushConstantRange{
-            .stageFlags = vk::ShaderStageFlagBits::eVertex,
-            .size = sizeof(VertexPushConstants),
+        vk::PushConstantRange pushConstantRange{
+            .stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+            .size = sizeof(PushConstants),
         };
-        vk::PushConstantRange fragmentPushConstantRange{
-            .stageFlags = vk::ShaderStageFlagBits::eFragment,
-            .offset = sizeof(VertexPushConstants),
-            .size = sizeof(FragmentPushConstants),
-        };
-        std::vector<vk::PushConstantRange> pushConstantRanges = {vertexPushConstantRange, fragmentPushConstantRange};
+        std::vector<vk::PushConstantRange> pushConstantRanges = {pushConstantRange};
 
         std::vector<vk::DescriptorSetLayout> descriptorSets = {*descriptorSetLayoutUBO, *descriptorSetLayoutTextures, *descriptorSetLayoutSSBO, *descriptorSetLayoutAmbientLightUBO, *descriptorSetLayoutDirectionalLightUBO};
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo{
@@ -764,9 +832,9 @@ namespace volchara {
             .pPushConstantRanges = pushConstantRanges.data(),
         };
 
-        pipelineLayout = device.createPipelineLayout(pipelineLayoutInfo);
+        colorPipelineLayout = device.createPipelineLayout(pipelineLayoutInfo);
 
-        vk::GraphicsPipelineCreateInfo pipelineInfo{
+        vk::GraphicsPipelineCreateInfo colorPipelineInfo{
             .stageCount = static_cast<uint32_t>(shaderStages.size()),
             .pStages = shaderStages.data(),
             .pVertexInputState = &vertexInputInfo,
@@ -777,11 +845,77 @@ namespace volchara {
             .pDepthStencilState = &depthStencil,
             .pColorBlendState = &colorBlending,
             .pDynamicState = &dynamicState,
-            .layout = pipelineLayout,
+            .layout = colorPipelineLayout,
             .renderPass = renderPass,
+            .subpass = 0,
         };
 
-        graphicsPipeline = device.createGraphicsPipeline(nullptr, pipelineInfo);
+        colorGraphicsPipeline = device.createGraphicsPipeline(nullptr, colorPipelineInfo);
+
+        auto lightVertShaderCode = readFile(getResourceDir() / "shaders/light.vert.spv");
+        auto lightFragShaderCode = readFile(getResourceDir() / "shaders/light.frag.spv");
+        vk::raii::ShaderModule lightVertShaderModule = createShaderModule(lightVertShaderCode);
+        vk::raii::ShaderModule lightFragShaderModule = createShaderModule(lightFragShaderCode);
+        vk::PipelineShaderStageCreateInfo lightVertShaderStageInfo{
+            .stage = vk::ShaderStageFlagBits::eVertex,
+            .module = lightVertShaderModule,
+            .pName = "main",
+        };
+        vk::PipelineShaderStageCreateInfo lightFragShaderStageInfo{
+            .stage = vk::ShaderStageFlagBits::eFragment,
+            .module = lightFragShaderModule,
+            .pName = "main",
+        };
+        std::vector<vk::PipelineShaderStageCreateInfo> lightShaderStages = {lightVertShaderStageInfo, lightFragShaderStageInfo};
+
+        vk::PipelineDepthStencilStateCreateInfo lightDepthStencil{
+            .depthTestEnable = false,
+            .depthWriteEnable = false,
+        };
+
+        std::vector<vk::PipelineColorBlendAttachmentState> lightColorBlendAttachments{
+            {
+                .blendEnable = true,
+                .srcColorBlendFactor = vk::BlendFactor::eOne,
+                .dstColorBlendFactor = vk::BlendFactor::eOne,
+                .srcAlphaBlendFactor = vk::BlendFactor::eOne,
+                .dstAlphaBlendFactor = vk::BlendFactor::eOne,
+                .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA
+            },
+        };
+
+        vk::PipelineColorBlendStateCreateInfo lightColorBlending{
+            .attachmentCount = static_cast<uint32_t>(lightColorBlendAttachments.size()),
+            .pAttachments = lightColorBlendAttachments.data(),
+        };
+
+        std::vector<vk::DescriptorSetLayout> lightDescriptorSets = {*descriptorSetLayoutLightSubpass, *descriptorSetLayoutUBO};
+        vk::PipelineLayoutCreateInfo lightPipelineLayoutInfo{
+            .setLayoutCount = static_cast<uint32_t>(lightDescriptorSets.size()),
+            .pSetLayouts = lightDescriptorSets.data(),
+            .pushConstantRangeCount = static_cast<uint32_t>(pushConstantRanges.size()),
+            .pPushConstantRanges = pushConstantRanges.data(),
+        };
+
+        lightPipelineLayout = device.createPipelineLayout(lightPipelineLayoutInfo);
+
+        vk::GraphicsPipelineCreateInfo lightPipelineInfo{
+            .stageCount = static_cast<uint32_t>(lightShaderStages.size()),
+            .pStages = lightShaderStages.data(),
+            .pVertexInputState = &vertexInputInfo,  // TODO: light volumes
+            .pInputAssemblyState = &inputAssembly,
+            .pViewportState = &viewportState,
+            .pRasterizationState = &rasterizer,
+            .pMultisampleState = &multisampling,
+            .pDepthStencilState = &lightDepthStencil,
+            .pColorBlendState = &lightColorBlending,
+            .pDynamicState = &dynamicState,
+            .layout = lightPipelineLayout,
+            .renderPass = renderPass,
+            .subpass = 1,
+        };
+
+        lightGraphicsPipeline = device.createGraphicsPipeline(nullptr, lightPipelineInfo);
     }
 
     void Renderer::createCommandPool() {
@@ -944,6 +1078,11 @@ namespace volchara {
             dstStage = vk::PipelineStageFlagBits::eEarlyFragmentTests;
             srcMask = vk::AccessFlagBits::eNone;
             dstMask = vk::AccessFlagBits::eDepthStencilAttachmentRead | vk::AccessFlagBits::eDepthStencilAttachmentWrite;
+        } else if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eColorAttachmentOptimal) {
+            srcStage = vk::PipelineStageFlagBits::eTopOfPipe;
+            dstStage = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+            srcMask = vk::AccessFlagBits::eNone;
+            dstMask = vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite;
         } else {
             throw std::runtime_error("unsupported transition");
         }
@@ -972,17 +1111,35 @@ namespace volchara {
 
     void Renderer::createDepthResources() {
         vk::Format depthFormat = findDepthFormat();
-        depthBuffer = createImage(swapChainExtent.width, swapChainExtent.height, depthFormat, vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eDepthStencilAttachment, vk::MemoryPropertyFlagBits::eDeviceLocal, vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil);
-        transitionImageLayout(depthBuffer, depthFormat, vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthStencilAttachmentOptimal);
+        for (size_t i = 0; i < swapChainImageViews.size(); i++) {
+            depthBuffers.push_back(createImage(swapChainExtent.width, swapChainExtent.height, depthFormat, vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eInputAttachment, vk::MemoryPropertyFlagBits::eDeviceLocal, vk::ImageAspectFlagBits::eDepth));
+            transitionImageLayout(depthBuffers[i], depthFormat, vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthStencilAttachmentOptimal);
+        }
+    }
+
+    void Renderer::createNormalResources() {
+        vk::Format normalFormat = vk::Format::eR16G16B16A16Sfloat;
+        for (size_t i = 0; i < swapChainImageViews.size(); i++) {
+            normalBuffers.push_back(createImage(swapChainExtent.width, swapChainExtent.height, normalFormat, vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eInputAttachment, vk::MemoryPropertyFlagBits::eDeviceLocal));
+            transitionImageLayout(normalBuffers[i], normalFormat, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
+        }
+    }
+
+    void Renderer::createIntermediateColorResources() {
+        vk::Format interFormat = vk::Format::eR8G8B8A8Unorm;
+        for (size_t i = 0; i < swapChainImageViews.size(); i++) {
+            intermediateColorBuffers.push_back(createImage(swapChainExtent.width, swapChainExtent.height, interFormat, vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eInputAttachment, vk::MemoryPropertyFlagBits::eDeviceLocal));
+            transitionImageLayout(intermediateColorBuffers[i], interFormat, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
+        }
     }
 
     void Renderer::createFramebuffers() {
         swapChainFramebuffers.clear();
         for (size_t i = 0; i < swapChainImageViews.size(); i++) {
-            std::array<const vk::ImageView, 2> attachments{*swapChainImageViews[i], depthBuffer.imageView()};
+            std::vector<vk::ImageView> attachments{intermediateColorBuffers[i].imageView(), normalBuffers[i].imageView(), depthBuffers[i].imageView(), *swapChainImageViews[i]};
             vk::FramebufferCreateInfo framebufferInfo{
                 .renderPass = renderPass,
-                .attachmentCount = attachments.size(),
+                .attachmentCount = static_cast<uint32_t>(attachments.size()),
                 .pAttachments = attachments.data(),
                 .width = swapChainExtent.width,
                 .height = swapChainExtent.height,
@@ -1063,13 +1220,20 @@ namespace volchara {
     }
 
     void Renderer::createDescriptorSets() {
-        std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayoutUBO);
+        std::vector<vk::DescriptorSetLayout> uboLayouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayoutUBO);
         vk::DescriptorSetAllocateInfo uboallocInfo{
             .descriptorPool = descriptorPool,
-            .descriptorSetCount = static_cast<uint32_t>(layouts.size()),
-            .pSetLayouts = layouts.data(),
+            .descriptorSetCount = static_cast<uint32_t>(uboLayouts.size()),
+            .pSetLayouts = uboLayouts.data(),
         };
         descriptorSetsUBO = device.allocateDescriptorSets(uboallocInfo);
+        std::vector<vk::DescriptorSetLayout> lightSubpassLayouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayoutLightSubpass);
+        vk::DescriptorSetAllocateInfo lightSubpassAllocInfo{
+            .descriptorPool = descriptorPool,
+            .descriptorSetCount = static_cast<uint32_t>(lightSubpassLayouts.size()),
+            .pSetLayouts = lightSubpassLayouts.data(),
+        };
+        descriptorSetsLightSubpass = device.allocateDescriptorSets(lightSubpassAllocInfo);
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             vk::DescriptorBufferInfo ubobufferInfo{
                 .buffer = uniformBuffers[i],
@@ -1084,6 +1248,40 @@ namespace volchara {
                 .pBufferInfo = &ubobufferInfo,
             };
             device.updateDescriptorSets(ubodescriptorWrite, nullptr);
+            vk::DescriptorImageInfo colorDescriptorImage{
+                .imageView = intermediateColorBuffers[i].imageView(),
+                .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+            };
+            vk::DescriptorImageInfo normalDescriptorImage{
+                .imageView = normalBuffers[i].imageView(),
+                .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+            };
+            vk::DescriptorImageInfo depthDescriptorImage{
+                .imageView = depthBuffers[i].imageView(),
+                .imageLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
+            };
+            vk::WriteDescriptorSet colorDescriptorWrite{
+                .dstSet = descriptorSetsLightSubpass[i],
+                .dstBinding = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eInputAttachment,
+                .pImageInfo = &colorDescriptorImage,
+            };
+            vk::WriteDescriptorSet normalDescriptorWrite{
+                .dstSet = descriptorSetsLightSubpass[i],
+                .dstBinding = 1,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eInputAttachment,
+                .pImageInfo = &normalDescriptorImage,
+            };
+            vk::WriteDescriptorSet depthDescriptorWrite{
+                .dstSet = descriptorSetsLightSubpass[i],
+                .dstBinding = 2,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eInputAttachment,
+                .pImageInfo = &depthDescriptorImage,
+            };
+            device.updateDescriptorSets({colorDescriptorWrite, normalDescriptorWrite, depthDescriptorWrite}, nullptr);
         }
 
         vk::DescriptorSetVariableDescriptorCountAllocateInfo texturecountInfo{
@@ -1272,18 +1470,19 @@ namespace volchara {
             .extent = swapChainExtent,
         };
         vk::ClearValue clearValueColor({0.0f, 0.0f, 0.0f, 1.0f});
+        vk::ClearValue clearValueNormal({0.0f, 0.0f, 0.0f, 1.0f});
         vk::ClearValue clearValueDepth({0.0f, 0});
-        std::array<vk::ClearValue, 2> clearValues{clearValueColor, clearValueDepth};
+        std::vector<vk::ClearValue> clearValues{clearValueColor, clearValueNormal, clearValueDepth, clearValueColor};
         vk::RenderPassBeginInfo renderPassInfo{
             .renderPass = renderPass,
             .framebuffer = swapChainFramebuffers[imageIndex],
             .renderArea = renderArea,
-            .clearValueCount = clearValues.size(),
+            .clearValueCount = static_cast<uint32_t>(clearValues.size()),
             .pClearValues = clearValues.data(),
         };
 
         commandBuffers[bufferIndex].beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
-        commandBuffers[bufferIndex].bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
+        commandBuffers[bufferIndex].bindPipeline(vk::PipelineBindPoint::eGraphics, colorGraphicsPipeline);
         commandBuffers[bufferIndex].bindVertexBuffers(
             0,
             {vertexBuffer},
@@ -1302,22 +1501,39 @@ namespace volchara {
             .extent = swapChainExtent,
         };
         commandBuffers[bufferIndex].setScissor(0, scissor);
-        commandBuffers[bufferIndex].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, *descriptorSetsUBO[bufferIndex], nullptr);
-        commandBuffers[bufferIndex].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 1, *descriptorSetsTextures[0], nullptr);
-        commandBuffers[bufferIndex].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 2, *descriptorSetsSSBO[0], nullptr);
-        commandBuffers[bufferIndex].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 3, *descriptorSetsAmbientLightUBO[0], nullptr);
-        commandBuffers[bufferIndex].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 4, *descriptorSetsDirectionalLightUBO[0], nullptr);
+        commandBuffers[bufferIndex].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, colorPipelineLayout, 0, *descriptorSetsUBO[bufferIndex], nullptr);
+        commandBuffers[bufferIndex].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, colorPipelineLayout, 1, *descriptorSetsTextures[0], nullptr);
+        commandBuffers[bufferIndex].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, colorPipelineLayout, 2, *descriptorSetsSSBO[0], nullptr);
+        commandBuffers[bufferIndex].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, colorPipelineLayout, 3, *descriptorSetsAmbientLightUBO[0], nullptr);
+        commandBuffers[bufferIndex].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, colorPipelineLayout, 4, *descriptorSetsDirectionalLightUBO[0], nullptr);
         uint32_t alreadyDrawn = 0;
         for (int i = 0; i < objects.size(); i++) {
-            VertexPushConstants vcnst;
-            vcnst.model = objects[i]->transform.modelMatrix();
-            FragmentPushConstants fcnst;
-            fcnst.textureIndex = objects[i]->textureIndex;
-            commandBuffers[bufferIndex].pushConstants<VertexPushConstants>(pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, {vcnst});
-            commandBuffers[bufferIndex].pushConstants<FragmentPushConstants>(pipelineLayout, vk::ShaderStageFlagBits::eFragment, sizeof(VertexPushConstants), {fcnst});
+            PushConstants cnst;
+            cnst.model = objects[i]->transform.modelMatrix();
+            cnst.textureIndex = objects[i]->textureIndex;
+            commandBuffers[bufferIndex].pushConstants<PushConstants>(colorPipelineLayout, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0, {cnst});
             commandBuffers[bufferIndex].drawIndexed(objects[i]->indices.size(), 1, alreadyDrawn, 0, 0);
             alreadyDrawn += objects[i]->indices.size();
         }
+
+        commandBuffers[bufferIndex].nextSubpass(vk::SubpassContents::eInline);
+        commandBuffers[bufferIndex].bindPipeline(vk::PipelineBindPoint::eGraphics, lightGraphicsPipeline);
+        commandBuffers[bufferIndex].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, lightPipelineLayout, 0, *descriptorSetsLightSubpass[imageIndex], nullptr);
+        commandBuffers[bufferIndex].bindDescriptorSets(vk::PipelineBindPoint::eGraphics, lightPipelineLayout, 1, *descriptorSetsUBO[bufferIndex], nullptr);
+        for (int i = 0; i < lights.size(); i++) {
+            PushConstants cnst;
+            cnst.color = glm::vec4(lights[i]->color, 0.0f);
+            cnst.model = lights[i]->transform.modelMatrix();
+            cnst.brightness = lights[i]->brightness;
+            commandBuffers[bufferIndex].pushConstants<PushConstants>(lightPipelineLayout, vk::ShaderStageFlagBits::eFragment, 0, {cnst});
+            commandBuffers[bufferIndex].draw(3, 1, 0, 0);
+        }
+        PushConstants cnst;
+        cnst.color = glm::vec4(ambientLight.color, 1.0f);  // w == isAmbient
+        cnst.brightness = ambientLight.brightness;
+        commandBuffers[bufferIndex].pushConstants<PushConstants>(lightPipelineLayout, vk::ShaderStageFlagBits::eFragment, 0, {cnst});
+        commandBuffers[bufferIndex].draw(3, 1, 0, 0);
+
         commandBuffers[bufferIndex].endRenderPass();
 
         commandBuffers[bufferIndex].end();

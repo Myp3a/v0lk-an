@@ -144,8 +144,11 @@ namespace volchara {
             vk::raii::DescriptorSetLayout descriptorSetLayoutSSBO = nullptr;
             vk::raii::DescriptorSetLayout descriptorSetLayoutAmbientLightUBO = nullptr;
             vk::raii::DescriptorSetLayout descriptorSetLayoutDirectionalLightUBO = nullptr;
-            vk::raii::PipelineLayout pipelineLayout = nullptr;
-            vk::raii::Pipeline graphicsPipeline = nullptr;
+            vk::raii::DescriptorSetLayout descriptorSetLayoutLightSubpass = nullptr;
+            vk::raii::PipelineLayout colorPipelineLayout = nullptr;
+            vk::raii::PipelineLayout lightPipelineLayout = nullptr;
+            vk::raii::Pipeline colorGraphicsPipeline = nullptr;
+            vk::raii::Pipeline lightGraphicsPipeline = nullptr;
         
             vk::raii::CommandPool commandPool = nullptr;
             std::vector<vk::raii::CommandBuffer> commandBuffers;
@@ -163,7 +166,9 @@ namespace volchara {
             std::vector<RAIIvmaBuffer> uniformBuffers;
             RAIIvmaBuffer ambientLightBuffer = nullptr;
             RAIIvmaBuffer directionalLightBuffer = nullptr;
-            RAIIvmaImage depthBuffer = nullptr;
+            std::vector<RAIIvmaImage> depthBuffers;
+            std::vector<RAIIvmaImage> normalBuffers;
+            std::vector<RAIIvmaImage> intermediateColorBuffers;
 
             vk::raii::DescriptorPool descriptorPool = nullptr;
             std::vector<vk::raii::DescriptorSet> descriptorSetsUBO;
@@ -171,6 +176,7 @@ namespace volchara {
             std::vector<vk::raii::DescriptorSet> descriptorSetsSSBO;
             std::vector<vk::raii::DescriptorSet> descriptorSetsAmbientLightUBO;
             std::vector<vk::raii::DescriptorSet> descriptorSetsDirectionalLightUBO;
+            std::vector<vk::raii::DescriptorSet> descriptorSetsLightSubpass;
 
             vk::raii::Sampler textureSampler = nullptr;
             std::vector<RAIIvmaImage> textures;
@@ -257,6 +263,8 @@ namespace volchara {
             void endSingleTimeCommands(vk::raii::CommandBuffer& buffer);
             void transitionImageLayout(const vk::Image& image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout);
             void createDepthResources();
+            void createNormalResources();
+            void createIntermediateColorResources();
             void createFramebuffers();
             uint32_t createTextureImage(const std::filesystem::path path);
             void createDescriptorPool();
